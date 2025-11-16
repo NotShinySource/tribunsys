@@ -90,17 +90,41 @@ class LoginController(QObject):
         """
         app_logger.info(f"Login exitoso para usuario: {user_data.get('nombre', 'N/A')}")
         
-        # Aquí se abrirá la ventana principal
-        # Por ahora solo mostramos un mensaje
-        self.login_window.show_success(
-            f"¡Bienvenido {user_data.get('nombre', '')} {user_data.get('apellido_P', '')}!"
-        )
-        
         # Cerrar ventana de login
         self.login_window.close()
         
-        # TODO: Abrir ventana principal
-        # self.open_main_window(user_data)
+        # Abrir ventana principal
+        self.open_main_window(user_data)
+    
+    def open_main_window(self, user_data):
+        """
+        Abre la ventana principal del sistema
+        
+        Args:
+            user_data (dict): Datos del usuario autenticado
+        """
+        from views.mainWindow import MainWindow
+        
+        self.main_window = MainWindow(user_data)
+        self.main_window.logout_requested.connect(self.on_logout_requested)
+        self.main_window.show()
+        
+        app_logger.info("Ventana principal abierta")
+    
+    def on_logout_requested(self):
+        """Maneja la solicitud de cerrar sesión"""
+        if self.current_user:
+            user_id = self.current_user.get("_id")
+            self.auth_service.logout(user_id)
+        
+        # Cerrar ventana principal
+        if hasattr(self, 'main_window'):
+            self.main_window.close()
+        
+        # Volver a mostrar login
+        self.show_login()
+        
+        app_logger.info("Sesión cerrada, volviendo a login")
     
     def get_current_user(self):
         """Retorna el usuario actual autenticado"""

@@ -101,8 +101,9 @@ class LoginWindow(QMainWindow):
         
         self.rut_input = QLineEdit()
         self.rut_input.setPlaceholderText("Ej: 12345678-9")
-        self.rut_input.setMaxLength(12)
+        self.rut_input.setMaxLength(10)
         self.rut_input.setMinimumHeight(25)  # Altura mínima para evitar corte
+        self.rut_input.textChanged.connect(self.format_rut_input)
         form_layout.addWidget(self.rut_input)
         
         # Campo Contraseña
@@ -158,7 +159,7 @@ class LoginWindow(QMainWindow):
     
     def on_login_clicked(self):
         """Maneja el clic en el botón de login"""
-        rut = self.rut_input.text().strip()
+        rut = self.rut_input.text().strip().upper()
         password = self.password_input.text()
         
         # Validaciones básicas
@@ -281,3 +282,43 @@ class LoginWindow(QMainWindow):
                 color: #2980b9;
             }
         """
+    
+    def format_rut_input(self, text):
+        """Formatea el RUT mientras se escribe"""
+        # Guardar posición del cursor
+        cursor_pos = self.rut_input.cursorPosition()
+        
+        # Limpiar: solo números y K/k
+        cleaned = ''.join(c for c in text.upper() if c.isdigit() or c == 'K')
+        
+        # Limitar longitud (máximo 9: 8 dígitos + 1 DV)
+        if len(cleaned) > 9:
+            cleaned = cleaned[:9]
+        
+        # Formatear SOLO si tiene todos los dígitos (8 o 9 caracteres)
+        if len(cleaned) >= 9:
+            # Separar cuerpo y dígito verificador
+            cuerpo = cleaned[:-1]
+            dv = cleaned[-1]
+            formatted = f"{cuerpo}-{dv}"
+        else:
+            # Mientras escribe, no formatear
+            formatted = cleaned
+        
+        # Actualizar solo si cambió
+        if formatted != text:
+            self.rut_input.blockSignals(True)
+            self.rut_input.setText(formatted)
+            
+            # Mantener cursor en posición lógica
+            # Si hay guión y el cursor estaba antes, mantener posición
+            if '-' in formatted:
+                if cursor_pos > len(cuerpo):
+                    cursor_pos = len(formatted)
+                else:
+                    cursor_pos = min(cursor_pos, len(cuerpo))
+            else:
+                cursor_pos = min(cursor_pos, len(formatted))
+            
+            self.rut_input.setCursorPosition(cursor_pos)
+            self.rut_input.blockSignals(False)

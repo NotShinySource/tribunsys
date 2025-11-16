@@ -1,0 +1,457 @@
+import os
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QFrame, QGridLayout, QScrollArea,
+    QMenu, QAction, QSizePolicy
+)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QPixmap, QCursor
+from config.settings import Settings
+from views.components.sidebarWidget import SidebarWidget
+from views.components.cardButton import CardButton
+
+
+class MainWindow(QMainWindow):
+    """Ventana principal del sistema"""
+    
+    # Señales
+    logout_requested = pyqtSignal()
+    theme_changed = pyqtSignal(str)  # 'light' o 'dark'
+    
+    def __init__(self, user_data: dict):
+        super().__init__()
+        self.user_data = user_data
+        self.current_theme = "light"
+        self.init_ui()
+    
+    def init_ui(self):
+        """Inicializa la interfaz de usuario"""
+        self.setWindowTitle(f"{Settings.APP_NAME} - Sistema Principal")
+        
+        # Tamaño inicial más grande pero NO maximizado
+        self.resize(1280, 900)
+        
+        # Widget central
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Layout principal (horizontal: sidebar + content)
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Sidebar
+        self.sidebar = SidebarWidget(user_role=self.user_data.get("rol", "cliente"))
+        self.sidebar.module_selected.connect(self.on_module_selected)
+        main_layout.addWidget(self.sidebar)
+        
+        # Área de contenido
+        content_widget = QWidget()
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        
+        # Header (SIN LÍNEAS DEBAJO)
+        self.add_header(content_layout)
+        
+        # Área de scroll para el contenido
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #f5f6fa; }")
+        
+        # Widget interno del scroll
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_layout.setContentsMargins(40, 30, 40, 30)
+        scroll_layout.setSpacing(25)
+        
+        # Banner de bienvenida
+        self.add_banner(scroll_layout)
+        
+        # Cards de módulos (CON ADAPTACIÓN A TAMAÑO)
+        self.add_module_cards(scroll_layout)
+        
+        # Widget de resumen
+        self.add_summary_widget(scroll_layout)
+        
+        # Espaciador para empujar todo hacia arriba
+        #scroll_layout.addStretch()
+        
+        scroll_content.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_content)
+        
+        content_layout.addWidget(scroll_area)
+        
+        # Footer (CENTRADO)
+        self.add_footer(content_layout)
+        
+        content_widget.setLayout(content_layout)
+        main_layout.addWidget(content_widget)
+        
+        central_widget.setLayout(main_layout)
+        
+        # Aplicar tema
+        self.apply_theme()
+    
+    def add_header(self, layout):
+        """Agrega el header con logo y menú de usuario - SIN LÍNEAS"""
+        header = QFrame()
+        header.setFixedHeight(70)
+        header.setStyleSheet("""
+            QFrame {
+                background-color: white;
+            }
+        """)
+        
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(30, 10, 30, 10)
+        
+        # Logo + Título
+        logo_layout = QHBoxLayout()
+        logo_layout.setSpacing(10)
+        
+        # Logo
+        logo_label = QLabel()
+        logo_path = os.path.join(Settings.IMAGES_DIR, "logo.png")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            scaled_pixmap = pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_label.setPixmap(scaled_pixmap)
+        else:
+            logo_label.setText("⚡")
+            logo_label.setFont(QFont("Arial", 24))
+            logo_label.setStyleSheet("color: #E94E1B;")
+        
+        logo_layout.addWidget(logo_label)
+        
+        # Título
+        title_label = QLabel("TribunSys")
+        title_label.setFont(QFont("Arial", 16, QFont.Bold))
+        title_label.setStyleSheet("color: #2c3e50;")
+        logo_layout.addWidget(title_label)
+        
+        header_layout.addLayout(logo_layout)
+        header_layout.addStretch()
+        
+        # Info del usuario + menú desplegable (SIN ROL)
+        user_layout = QHBoxLayout()
+        user_layout.setSpacing(15)
+        
+        # Nombre del usuario solamente
+        user_info = QLabel(f"Bienvenido, {self.user_data.get('nombre', '')} {self.user_data.get('apellido_P', '')}")
+        user_info.setFont(QFont("Arial", 10))
+        user_info.setStyleSheet("color: #2c3e50;")
+        user_layout.addWidget(user_info)
+        
+        # Botón de menú de usuario
+        self.user_menu_button = QPushButton("👤 ▼")
+        self.user_menu_button.setFont(QFont("Arial", 10))
+        self.user_menu_button.setCursor(QCursor(Qt.PointingHandCursor))
+        self.user_menu_button.setFixedSize(70, 35)
+        self.user_menu_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+            }
+        """)
+        self.user_menu_button.clicked.connect(self.show_user_menu)
+        user_layout.addWidget(self.user_menu_button)
+        
+        header_layout.addLayout(user_layout)
+        header.setLayout(header_layout)
+        layout.addWidget(header)
+    
+    def show_user_menu(self):
+        """Muestra el menú desplegable del usuario"""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 30px 8px 10px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #fef5f1;
+                color: #E94E1B;
+            }
+        """)
+        
+        # Mi perfil
+        profile_action = QAction("👤 Mi Perfil", self)
+        profile_action.triggered.connect(self.open_profile)
+        menu.addAction(profile_action)
+        
+        # Cambiar contraseña
+        password_action = QAction("🔑 Cambiar Contraseña", self)
+        password_action.triggered.connect(self.change_password)
+        menu.addAction(password_action)
+        
+        menu.addSeparator()
+        
+        # Tema (Dark Mode)
+        theme_text = "🌙 Modo Oscuro" if self.current_theme == "light" else "☀️ Modo Claro"
+        theme_action = QAction(theme_text, self)
+        theme_action.triggered.connect(self.toggle_theme)
+        menu.addAction(theme_action)
+        
+        menu.addSeparator()
+        
+        # Cerrar sesión
+        logout_action = QAction("🚪 Cerrar Sesión", self)
+        logout_action.triggered.connect(self.logout)
+        menu.addAction(logout_action)
+        
+        # Mostrar el menú debajo del botón
+        menu.exec_(self.user_menu_button.mapToGlobal(self.user_menu_button.rect().bottomLeft()))
+    
+    def add_banner(self, layout):
+        """Agrega el banner de bienvenida - CARGA banner.png"""
+        banner = QFrame()
+        banner.setFixedHeight(180)
+        banner.setStyleSheet("""
+            QFrame {
+                border-radius: 10px;
+                background-color: white;
+            }
+        """)
+        
+        banner_layout = QVBoxLayout()
+        banner_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Intentar cargar imagen del banner
+        banner_path = os.path.join(Settings.IMAGES_DIR, "banner.png")
+        
+        if os.path.exists(banner_path):
+            # Cargar imagen personalizada
+            banner_label = QLabel()
+            banner_label.setAlignment(Qt.AlignCenter)
+            pixmap = QPixmap(banner_path)
+            scaled_pixmap = pixmap.scaledToHeight(180, Qt.SmoothTransformation)
+            banner_label.setPixmap(scaled_pixmap)
+            banner_label.setScaledContents(False)
+            banner_layout.addWidget(banner_label)
+        else:
+            # Fallback: gradiente con texto
+            banner.setStyleSheet("""
+                QFrame {
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #E94E1B,
+                        stop:1 #ff7043
+                    );
+                    border-radius: 10px;
+                }
+            """)
+            banner_layout.setContentsMargins(30, 20, 30, 20)
+            
+            title = QLabel("INTEGRACIÓN DE LAS BOLSAS DE")
+            title.setFont(QFont("Arial", 16, QFont.Bold))
+            title.setStyleSheet("color: white;")
+            banner_layout.addWidget(title)
+            
+            subtitle = QLabel("CHILE, COLOMBIA Y PERÚ")
+            subtitle.setFont(QFont("Arial", 20, QFont.Bold))
+            subtitle.setStyleSheet("color: white;")
+            banner_layout.addWidget(subtitle)
+            
+            description = QLabel("NUAM se destaca por un crecimiento sostenido a través de un mercado más amplio, líquido y eficiente")
+            description.setFont(QFont("Arial", 9))
+            description.setStyleSheet("color: rgba(255,255,255,0.9);")
+            description.setWordWrap(True)
+            banner_layout.addWidget(description)
+            
+            banner_layout.addStretch()
+        
+        banner.setLayout(banner_layout)
+        layout.addWidget(banner)
+    
+    def add_module_cards(self, layout):
+        """Agrega las tarjetas de módulos - SE ADAPTAN AL TAMAÑO"""
+        cards_label = QLabel("Módulos del Sistema")
+        cards_label.setFont(QFont("Arial", 14, QFont.Bold))
+        cards_label.setStyleSheet("color: #2c3e50; margin-top: 5px; margin-bottom: 15px;")
+        layout.addWidget(cards_label)
+        
+        # Grid de cards adaptable
+        grid = QGridLayout()
+        grid.setSpacing(25)
+        
+        modules = self.get_modules_by_role()
+        
+        row, col = 0, 0
+        max_cols = 3  # Máximo 4 columnas para pantallas grandes
+        
+        for module in modules:
+            card = CardButton(
+                module_id=module["id"],
+                title=module["title"],
+                icon=module["icon"],
+                description=module.get("description", "")
+            )
+            card.clicked.connect(self.on_module_selected)
+            grid.addWidget(card, row, col)
+            
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+        
+        
+        layout.addLayout(grid)
+    
+    def get_modules_by_role(self):
+        """Retorna los módulos disponibles según el rol"""
+        base_modules = [
+            {
+                "id": "consultar",
+                "title": "Consultar y Filtrar Datos",
+                "icon": "🔍",
+                "description": "Buscar información tributaria"
+            },
+            {
+                "id": "reportes",
+                "title": "Generar Reportes",
+                "icon": "📄",
+                "description": "Crear reportes tributarios"
+            }
+        ]
+        
+        employee_modules = [
+            {
+                "id": "calificaciones",
+                "title": "Gestionar Calificaciones",
+                "icon": "📊",
+                "description": "CRUD de calificaciones"
+            },
+            {
+                "id": "carga_masiva",
+                "title": "Carga Masiva",
+                "icon": "📤",
+                "description": "Importar datos CSV/Excel"
+            },
+            {
+                "id": "subsidios",
+                "title": "Gestionar Subsidios",
+                "icon": "🎁",
+                "description": "Administrar beneficios"
+            }
+        ]
+        
+        admin_modules = [
+            {
+                "id": "usuarios",
+                "title": "Gestionar Usuarios",
+                "icon": "👥",
+                "description": "Administrar accesos"
+            }
+        ]
+        
+        role = self.user_data.get("rol", "cliente")
+        if role == "administrador":
+            return employee_modules + base_modules + admin_modules
+        elif role == "empleado":
+            return employee_modules + base_modules
+        else:
+            return base_modules
+    
+    def add_summary_widget(self, layout):
+        """Agrega el widget de resumen"""
+        summary = QFrame()
+        summary.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                padding: 20px;
+            }
+        """)
+        
+        summary_layout = QVBoxLayout()
+        
+        title = QLabel("📈 Resumen Rápido")
+        title.setFont(QFont("Arial", 13, QFont.Bold))
+        title.setStyleSheet("color: #2c3e50;")
+        summary_layout.addWidget(title)
+        
+        # Datos de ejemplo (luego serán dinámicos desde Firebase)
+        stats = [
+            "• Última actualización: Hoy",
+            "• Calificaciones activas: Cargando...",
+            "• Subsidios aplicados este mes: Cargando..."
+        ]
+        
+        for stat in stats:
+            stat_label = QLabel(stat)
+            stat_label.setFont(QFont("Arial", 10))
+            stat_label.setStyleSheet("color: #7f8c8d;")
+            summary_layout.addWidget(stat_label)
+        
+        summary.setLayout(summary_layout)
+        layout.addWidget(summary, 1)
+    
+    def add_footer(self, layout):
+        """Agrega el footer - TEXTO CENTRADO"""
+        footer = QFrame()
+        footer.setFixedHeight(45)
+        footer.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-top: 1px solid #dee2e6;
+            }
+        """)
+        
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Texto completamente centrado
+        footer_text = QLabel(f"© 2025 Nuam  |  v{Settings.APP_VERSION}")
+        footer_text.setFont(QFont("Arial", 9))
+        footer_text.setStyleSheet("color: #95a5a6;")
+        footer_text.setAlignment(Qt.AlignCenter)
+        
+        footer_layout.addWidget(footer_text)
+        footer.setLayout(footer_layout)
+        layout.addWidget(footer)
+    
+    def on_module_selected(self, module_id: str):
+        """Maneja la selección de un módulo"""
+        print(f"Módulo seleccionado: {module_id}")
+        # TODO: Implementar navegación a cada módulo
+    
+    def open_profile(self):
+        """Abre el perfil del usuario"""
+        print("Abrir perfil")
+        # TODO: Implementar
+    
+    def change_password(self):
+        """Abre el diálogo de cambio de contraseña"""
+        print("Cambiar contraseña")
+        # TODO: Implementar
+    
+    def toggle_theme(self):
+        """Cambia entre tema claro y oscuro"""
+        self.current_theme = "dark" if self.current_theme == "light" else "light"
+        self.apply_theme()
+        self.theme_changed.emit(self.current_theme)
+        print(f"Tema cambiado a: {self.current_theme}")
+    
+    def apply_theme(self):
+        """Aplica el tema actual"""
+        # TODO: Implementar en FASE 2
+        pass
+    
+    def logout(self):
+        """Cierra la sesión"""
+        self.logout_requested.emit()
+        self.close()
