@@ -2,7 +2,7 @@ import os
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFrame, QGridLayout, QScrollArea,
-    QMenu, QAction, QSizePolicy
+    QMenu, QAction, QSizePolicy, QStackedWidget
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QPixmap, QCursor
@@ -45,54 +45,101 @@ class MainWindow(QMainWindow):
         self.sidebar.module_selected.connect(self.on_module_selected)
         main_layout.addWidget(self.sidebar)
         
-        # Área de contenido
+        # Área de contenido (con stack de widgets)
         content_widget = QWidget()
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
         
         # Header (SIN LÍNEAS DEBAJO)
-        self.add_header(content_layout)
+        self.add_header(self.content_layout)
         
-        # Área de scroll para el contenido
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #f5f6fa; }")
+        # Stack de contenidos (área intercambiable)
+        self.content_stack = QStackedWidget()
+        self.content_layout.addWidget(self.content_stack)
         
-        # Widget interno del scroll
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout()
-        scroll_layout.setContentsMargins(40, 30, 40, 30)
-        scroll_layout.setSpacing(25)
+        # Crear páginas
+        self.create_home_page()
+        self.create_carga_masiva_page()
+        self.create_gestionar_calificaciones_page()
         
-        # Banner de bienvenida
-        self.add_banner(scroll_layout)
-        
-        # Cards de módulos (CON ADAPTACIÓN A TAMAÑO)
-        self.add_module_cards(scroll_layout)
-        
-        # Widget de resumen
-        self.add_summary_widget(scroll_layout)
-        
-        # Espaciador para empujar todo hacia arriba
-        #scroll_layout.addStretch()
-        
-        scroll_content.setLayout(scroll_layout)
-        scroll_area.setWidget(scroll_content)
-        
-        content_layout.addWidget(scroll_area)
+        # Mostrar página de inicio
+        self.content_stack.setCurrentIndex(0)
         
         # Footer (CENTRADO)
-        self.add_footer(content_layout)
+        self.add_footer(self.content_layout)
         
-        content_widget.setLayout(content_layout)
+        content_widget.setLayout(self.content_layout)
         main_layout.addWidget(content_widget)
         
         central_widget.setLayout(main_layout)
         
         # Aplicar tema
         self.apply_theme()
+    
+    def create_home_page(self):
+        """Crea la página de inicio (banner + cards + resumen)"""
+        home_widget = QWidget()
+        
+        # Área de scroll
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #f5f6fa; }")
+        
+        # Contenido
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_layout.setContentsMargins(40, 30, 40, 30)
+        scroll_layout.setSpacing(25)
+        
+        # Banner
+        self.add_banner(scroll_layout)
+        
+        # Cards
+        self.add_module_cards(scroll_layout)
+        
+        # Resumen (solo para usuarios internos)
+        if self.user_data.get("rol") != "cliente":
+            self.add_summary_widget(scroll_layout)
+        
+        scroll_content.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_content)
+        
+        home_layout = QVBoxLayout()
+        home_layout.setContentsMargins(0, 0, 0, 0)
+        home_layout.addWidget(scroll_area)
+        home_widget.setLayout(home_layout)
+        
+        self.content_stack.addWidget(home_widget)
+    
+    def create_carga_masiva_page(self):
+        """Crea la página de carga masiva"""
+        from views.massiveLoadWindow import CargaMasivaContent
+        
+        carga_masiva_widget = CargaMasivaContent(self.user_data)
+        carga_masiva_widget.back_requested.connect(self.show_home)
+        self.content_stack.addWidget(carga_masiva_widget)
+
+    def create_gestionar_calificaciones_page(self):
+        """Crea la página de gestión de calificaciones"""
+        from views.taxManagementWindow import GestionCalificacionesContent
+        
+        gestion_cal_widget = GestionCalificacionesContent(self.user_data)
+        gestion_cal_widget.back_requested.connect(self.show_home)
+        self.content_stack.addWidget(gestion_cal_widget)
+    
+    def show_home(self):
+        """Muestra la página de inicio"""
+        self.content_stack.setCurrentIndex(0)
+    
+    def show_carga_masiva(self):
+        """Muestra la página de carga masiva"""
+        self.content_stack.setCurrentIndex(1)
+
+    def show_gestionar_calificaciones(self):
+        """Muestra la página de gestión de calificaciones"""
+        self.content_stack.setCurrentIndex(2)
     
     def add_header(self, layout):
         """Agrega el header con logo y menú de usuario - SIN LÍNEAS"""
@@ -290,7 +337,7 @@ class MainWindow(QMainWindow):
         modules = self.get_modules_by_role()
         
         row, col = 0, 0
-        max_cols = 3  # Máximo 4 columnas para pantallas grandes
+        max_cols = 3
         
         for module in modules:
             card = CardButton(
@@ -306,7 +353,6 @@ class MainWindow(QMainWindow):
             if col >= max_cols:
                 col = 0
                 row += 1
-        
         
         layout.addLayout(grid)
     
@@ -427,7 +473,14 @@ class MainWindow(QMainWindow):
     def on_module_selected(self, module_id: str):
         """Maneja la selección de un módulo"""
         print(f"Módulo seleccionado: {module_id}")
-        # TODO: Implementar navegación a cada módulo
+        
+        if module_id == "carga_masiva":
+            self.show_carga_masiva()
+        elif module_id == "calificaciones":
+            self.show_gestionar_calificaciones()
+        else:
+            # TODO: Implementar otros módulos
+            self.show_home()
     
     def open_profile(self):
         """Abre el perfil del usuario"""

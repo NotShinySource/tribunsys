@@ -1,8 +1,3 @@
-"""
-TribunSys - Servicio de Autenticación
-Maneja la lógica de autenticación con Firebase
-"""
-
 from datetime import datetime, timezone, timedelta
 from config.firebaseConfig import firebase_config
 from config.settings import Settings

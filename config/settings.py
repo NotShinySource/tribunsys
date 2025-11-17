@@ -9,11 +9,11 @@ class Settings:
     
     # Información de la aplicación
     APP_NAME = os.getenv("APP_NAME", "TribunSys")
-    APP_VERSION = os.getenv("APP_VERSION", "0.4.0")
+    APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
     ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
     
     # Seguridad
-    SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key")
+    SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key_change_this")
     BCRYPT_ROUNDS = int(os.getenv("BCRYPT_ROUNDS", "12"))
     
     # Logging
@@ -25,7 +25,7 @@ class Settings:
     # Colecciones de Firestore
     COLLECTION_USUARIOS = "usuarios"
     COLLECTION_CLIENTES = "clientes"
-    COLLECTION_DATOS_TRIBUTARIOS = "datos_tributarios"
+    COLLECTION_DATOS_TRIBUTARIOS = "datosTributarios"
     COLLECTION_SUBSIDIOS = "subsidios"
     COLLECTION_REPORTES = "reportes"
     COLLECTION_AUDITORIA = "auditoria"

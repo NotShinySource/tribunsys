@@ -143,30 +143,20 @@ class SidebarWidget(QWidget):
     
     def get_modules_by_role(self):
         """Retorna los módulos disponibles según el rol"""
-        # Módulos base para todos
-        base_modules = [
-            {"id": "consultar", "text": "Consultar Datos", "icon": "🔍"},
-            {"id": "reportes", "text": "Generar Reportes", "icon": "📄"}
-        ]
+        from config.roles import ModulosConfig
         
-        # Módulos para empleado y admin
-        employee_modules = [
-            {"id": "calificaciones", "text": "Gestionar Calificaciones", "icon": "📊"},
-            {"id": "carga_masiva", "text": "Carga Masiva", "icon": "📤"},
-            {"id": "subsidios", "text": "Gestionar Subsidios", "icon": "🎁"}
-        ]
+        # Obtener módulos permitidos según el rol
+        modules = ModulosConfig.get_modulos_por_rol(self.user_role)
         
-        # Módulo exclusivo admin
-        admin_modules = [
-            {"id": "usuarios", "text": "Gestionar Usuarios", "icon": "👥"}
+        # Convertir al formato que espera el sidebar
+        return [
+            {
+                "id": mod["id"],
+                "text": mod["title"],
+                "icon": mod["icon"]
+            }
+            for mod in modules
         ]
-        
-        if self.user_role == "administrador":
-            return employee_modules + base_modules + admin_modules
-        elif self.user_role == "empleado":
-            return employee_modules + base_modules
-        else:  # cliente
-            return base_modules
     
     def toggle_sidebar(self):
         """Colapsa o expande el sidebar"""
