@@ -357,59 +357,23 @@ class MainWindow(QMainWindow):
         layout.addLayout(grid)
     
     def get_modules_by_role(self):
-        """Retorna los módulos disponibles según el rol"""
-        base_modules = [
-            {
-                "id": "consultar",
-                "title": "Consultar y Filtrar Datos",
-                "icon": "🔍",
-                "description": "Buscar información tributaria"
-            },
-            {
-                "id": "reportes",
-                "title": "Generar Reportes",
-                "icon": "📄",
-                "description": "Crear reportes tributarios"
-            }
-        ]
+        """
+        Retorna los módulos disponibles según el rol
         
-        employee_modules = [
-            {
-                "id": "calificaciones",
-                "title": "Gestionar Calificaciones",
-                "icon": "📊",
-                "description": "CRUD de calificaciones"
-            },
-            {
-                "id": "carga_masiva",
-                "title": "Carga Masiva",
-                "icon": "📤",
-                "description": "Importar datos CSV/Excel"
-            },
-            {
-                "id": "subsidios",
-                "title": "Gestionar Subsidios",
-                "icon": "🎁",
-                "description": "Administrar beneficios"
-            }
-        ]
+        Usa ModulosConfig para asegurar consistencia entre:
+        - Cards del home
+        - Sidebar
+        - Permisos de navegación
+        """
+        from config.roles import ModulosConfig
         
-        admin_modules = [
-            {
-                "id": "usuarios",
-                "title": "Gestionar Usuarios",
-                "icon": "👥",
-                "description": "Administrar accesos"
-            }
-        ]
+        rol = self.user_data.get("rol", "cliente")
         
-        role = self.user_data.get("rol", "cliente")
-        if role == "administrador":
-            return employee_modules + base_modules + admin_modules
-        elif role == "empleado":
-            return employee_modules + base_modules
-        else:
-            return base_modules
+        # Obtener módulos permitidos para este rol
+        modulos_permitidos = ModulosConfig.get_modulos_por_rol(rol)
+        
+        # Ya vienen con el formato correcto: id, title, icon, description
+        return modulos_permitidos
     
     def add_summary_widget(self, layout):
         """Agrega el widget de resumen"""

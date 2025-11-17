@@ -309,6 +309,8 @@ class CargaMasivaContent(QWidget):
                 font-weight: bold;
             }
         """)
+        self.preview_table.setMaximumHeight(450)  # Valor alto
+        self.preview_table.setMinimumHeight(200)
         layout.addWidget(self.preview_table)
         
         preview_label.hide()

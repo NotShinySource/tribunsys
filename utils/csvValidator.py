@@ -178,11 +178,11 @@ class CSVValidator:
             pd.DataFrame: DataFrame vacío con las columnas correctas
         """
         data = {
-            'cliente_rut': ['12345678-9', '98765432-1'],
+            'cliente_rut': ['12345678-5', '21232535-K'],
             'fecha_declaracion': ['2024-11-20', '2024-11-21'],
             'monto_declarado': [1500000, 2300000],
             'tipo_impuesto': ['Renta', 'IVA'],
-            'pais': ['Chile', 'Peru']
+            'pais': ['Peru', 'Chile']
         }
         
         # Agregar factores del 1 al 19 con valores de ejemplo

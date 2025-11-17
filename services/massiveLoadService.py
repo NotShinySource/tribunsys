@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Tuple
 from config.firebaseConfig import firebase_config
 from config.settings import Settings
@@ -13,6 +13,11 @@ class CargaMasivaService:
         self.db = firebase_config.get_firestore_client()
         self.datos_ref = self.db.collection(Settings.COLLECTION_DATOS_TRIBUTARIOS)
         self.clientes_ref = self.db.collection(Settings.COLLECTION_CLIENTES)
+        self.chile_tz = timezone(timedelta(hours=-3))
+
+    def get_chile_time(self):
+        """Retorna la fecha/hora actual en zona horaria de Chile"""
+        return datetime.now(self.chile_tz)
     
     def import_data(self, df: pd.DataFrame, usuario_carga_id: str, 
                    progress_callback=None) -> Dict:
@@ -139,7 +144,7 @@ class CargaMasivaService:
                 "sector_economico": "No especificado",
                 "direccion": "",
                 "pais": "Chile",
-                "fecha_creacion": datetime.now()
+                "fecha_creacion": self.get_chile_time()
             }
             
             doc_ref = self.clientes_ref.add(nuevo_cliente)
@@ -181,8 +186,8 @@ class CargaMasivaService:
             "pais": row['pais'],
             "factores": factores,
             "subsidiosAplicados": [],
-            "fechaCreacion": datetime.now(),
-            "fechaModificacion": datetime.now(),
+            "fechaCreacion": self.get_chile_time(),
+            "fechaModificacion": self.get_chile_time(),
             "activo": True
         }
         

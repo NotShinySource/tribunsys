@@ -3,9 +3,13 @@ import firebase_admin
 from firebase_admin import credentials, firestore, auth
 import pyrebase
 from dotenv import load_dotenv
+from utils.helpers import resource_path
+
+
 
 # Cargar variables de entorno
-load_dotenv()
+env_path = resource_path(".env")
+load_dotenv(env_path)
 
 
 class FirebaseConfig:
@@ -32,8 +36,9 @@ class FirebaseConfig:
                 "appId": os.getenv("FIREBASE_APP_ID"),
                 "databaseURL": os.getenv("FIREBASE_DATABASE_URL")
             }
-            
-            self.credentials_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
+
+            relative_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
+            self.credentials_path = resource_path(relative_path)
             self._initialize_firebase()
             FirebaseConfig._initialized = True
     

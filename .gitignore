@@ -72,3 +72,6 @@ htmlcov/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Archivo de especificación generado por PyInstaller
+main.spec
