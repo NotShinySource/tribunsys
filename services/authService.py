@@ -3,6 +3,7 @@ from config.firebaseConfig import firebase_config
 from config.settings import Settings
 from utils.encryption import verify_password
 from utils.logger import app_logger
+from services.firebaseWrapper import requires_connection, safe_firebase_operation
 
 
 class AuthService:
@@ -19,6 +20,7 @@ class AuthService:
         """Retorna la fecha/hora actual en zona horaria de Chile"""
         return datetime.now(self.chile_tz)
     
+    @requires_connection
     def login(self, rut: str, password: str) -> dict:
         """
         Autentica un usuario
@@ -88,6 +90,7 @@ class AuthService:
                 "message": "Error al autenticar. Por favor intente nuevamente."
             }
     
+    @requires_connection
     def register(self, user_data: dict) -> dict:
         """
         Registra un nuevo usuario
@@ -137,6 +140,7 @@ class AuthService:
                 "message": "Error al registrar usuario. Por favor intente nuevamente."
             }
     
+    @safe_firebase_operation
     def logout(self, user_id: str):
         """
         Cierra la sesión del usuario
@@ -155,6 +159,7 @@ class AuthService:
         except Exception as e:
             app_logger.error(f"Error al cerrar sesión: {str(e)}")
     
+    @requires_connection
     def change_password(self, user_id: str, old_password: str, new_password: str) -> dict:
         """
         Cambia la contraseña de un usuario

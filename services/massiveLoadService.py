@@ -4,12 +4,14 @@ from typing import Dict, List, Tuple
 from config.firebaseConfig import firebase_config
 from config.settings import Settings
 from utils.logger import app_logger, log_audit
+from services.firebaseWrapper import requires_connection, FirebaseServiceBase
 
 
 class CargaMasivaService:
     """Servicio para importar datos tributarios masivamente"""
     
     def __init__(self):
+        super().__init__()  # ← Agregar esta línea
         self.db = firebase_config.get_firestore_client()
         self.datos_ref = self.db.collection(Settings.COLLECTION_DATOS_TRIBUTARIOS)
         self.clientes_ref = self.db.collection(Settings.COLLECTION_CLIENTES)
@@ -19,6 +21,7 @@ class CargaMasivaService:
         """Retorna la fecha/hora actual en zona horaria de Chile"""
         return datetime.now(self.chile_tz)
     
+    @requires_connection
     def import_data(self, df: pd.DataFrame, usuario_carga_id: str, 
                    progress_callback=None) -> Dict:
         """

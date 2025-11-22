@@ -9,6 +9,8 @@ from PyQt5.QtGui import QFont, QPixmap, QCursor
 from config.settings import Settings
 from views.components.sidebarWidget import SidebarWidget
 from views.components.cardButton import CardButton
+from utils.connectionManager import connection_manager
+from views.components.connectionIndicator import ConnectionIndicator, ConnectionStatusBar
 
 
 class MainWindow(QMainWindow):
@@ -22,6 +24,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.user_data = user_data
         self.current_theme = "light"
+
+        connection_manager.start_monitoring()
+
         self.init_ui()
     
     def init_ui(self):
@@ -135,21 +140,25 @@ class MainWindow(QMainWindow):
     
     def show_carga_masiva(self):
         """Muestra la página de carga masiva"""
+
+        if not self.check_connection_before_operation("Carga Masiva"):
+            return
+
         self.content_stack.setCurrentIndex(1)
 
     def show_gestionar_calificaciones(self):
         """Muestra la página de gestión de calificaciones"""
+
+        if not self.check_connection_before_operation("Gestionar Calificaciones"):
+            return
+
         self.content_stack.setCurrentIndex(2)
     
     def add_header(self, layout):
         """Agrega el header con logo y menú de usuario - SIN LÍNEAS"""
         header = QFrame()
         header.setFixedHeight(70)
-        header.setStyleSheet("""
-            QFrame {
-                background-color: white;
-            }
-        """)
+        header.setStyleSheet("QFrame { background-color: white; }")
         
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(30, 10, 30, 10)
@@ -180,6 +189,15 @@ class MainWindow(QMainWindow):
         
         header_layout.addLayout(logo_layout)
         header_layout.addStretch()
+
+        # Indicador de conexión
+        self.connection_indicator = ConnectionIndicator()
+        header_layout.addWidget(self.connection_indicator)
+        
+        # Separador visual
+        separator = QLabel("|")
+        separator.setStyleSheet("color: #dee2e6; padding: 0 10px;")
+        header_layout.addWidget(separator)
         
         # Info del usuario + menú desplegable (SIN ROL)
         user_layout = QHBoxLayout()
@@ -213,6 +231,9 @@ class MainWindow(QMainWindow):
         header_layout.addLayout(user_layout)
         header.setLayout(header_layout)
         layout.addWidget(header)
+
+        self.connection_status_bar = ConnectionStatusBar()
+        layout.addWidget(self.connection_status_bar)
     
     def show_user_menu(self):
         """Muestra el menú desplegable del usuario"""
@@ -472,3 +493,37 @@ class MainWindow(QMainWindow):
         """Cierra la sesión"""
         self.logout_requested.emit()
         self.close()
+
+    def closeEvent(self, event):
+        """
+        Maneja el cierre de la ventana
+        Detiene el monitoreo de conexión
+        """
+        # Detener monitoreo de conexión
+        connection_manager.stop_monitoring()
+        
+        # Cerrar normalmente
+        super().closeEvent(event)
+
+    def check_connection_before_operation(self, operation_name: str = "Esta operación") -> bool:
+        """
+        Verifica si hay conexión antes de realizar una operación
+        Muestra mensaje al usuario si no hay conexión
+        
+        Args:
+            operation_name (str): Nombre de la operación para el mensaje
+            
+        Returns:
+            bool: True si hay conexión, False si no
+        """
+        if not connection_manager.is_online():
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Sin conexión",
+                f"{operation_name} requiere conexión a internet.\n\n"
+                "Por favor, verifica tu conexión y vuelve a intentarlo."
+            )
+            return False
+        
+        return True

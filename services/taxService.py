@@ -4,9 +4,10 @@ from config.firebaseConfig import firebase_config
 from config.settings import Settings
 from utils.logger import app_logger, log_audit
 from utils.validators import validate_factor_sum
+from services.firebaseWrapper import requires_connection, FirebaseServiceBase
 
 
-class CalificacionTributariaService:
+class CalificacionTributariaService(FirebaseServiceBase):
     """Servicio para gestionar calificaciones tributarias (CRUD)"""
     
     def __init__(self):
