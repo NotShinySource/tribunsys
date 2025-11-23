@@ -14,7 +14,7 @@ class CargaMasivaService:
         super().__init__()  # ← Agregar esta línea
         self.db = firebase_config.get_firestore_client()
         self.datos_ref = self.db.collection(Settings.COLLECTION_DATOS_TRIBUTARIOS)
-        self.clientes_ref = self.db.collection(Settings.COLLECTION_CLIENTES)
+        self.clientes_ref = self.db.collection(Settings.COLLECTION_USUARIOS)
         self.chile_tz = timezone(timedelta(hours=-3))
 
     def get_chile_time(self):
@@ -56,10 +56,10 @@ class CargaMasivaService:
                     progress_callback(progress)
                 
                 # Buscar o crear cliente
-                cliente_id = self.get_or_create_cliente(row['cliente_rut'])
+                cliente_id = self.validate_cliente(row['cliente_rut'])
                 
                 if not cliente_id:
-                    errors.append(f"Fila {idx + 2}: No se pudo obtener/crear cliente con RUT {row['cliente_rut']}")
+                    errors.append(f"Fila {idx + 2}: No se pudo obtener cliente con RUT {row['cliente_rut']}")
                     continue
                 
                 # Preparar datos tributarios
@@ -118,15 +118,18 @@ class CargaMasivaService:
             "total_processed": created_count + updated_count
         }
     
-    def get_or_create_cliente(self, rut: str) -> str:
+    def validate_cliente(self, rut: str) -> tuple:
         """
-        Busca un cliente por RUT, si no existe lo crea con datos básicos
+        Valida que un cliente exista en la base de datos
+        NO CREA clientes nuevos
         
         Args:
             rut (str): RUT del cliente
             
         Returns:
-            str: ID del cliente en Firebase
+            tuple: (cliente_id, error_message)
+                Si existe: (cliente_id, None)
+                Si no existe: (None, "mensaje de error")
         """
         try:
             # Buscar cliente existente
@@ -134,31 +137,18 @@ class CargaMasivaService:
             results = query.stream()
             
             for doc in results:
-                return doc.id
+                app_logger.debug(f"Cliente encontrado: {rut}")
+                return doc.id, None
             
-            # Si no existe, crear cliente básico
-            nuevo_cliente = {
-                "rut": rut,
-                "nombre": "Cliente",
-                "apellido_P": "Importado",
-                "apellido_M": "",
-                "correo": f"{rut.replace('-', '')}@temp.com",
-                "razon_social": f"Cliente {rut}",
-                "sector_economico": "No especificado",
-                "direccion": "",
-                "pais": "Chile",
-                "fecha_creacion": self.get_chile_time()
-            }
-            
-            doc_ref = self.clientes_ref.add(nuevo_cliente)
-            cliente_id = doc_ref[1].id
-            
-            app_logger.info(f"Cliente creado automáticamente: {rut}")
-            return cliente_id
+            # Cliente NO existe
+            error_msg = f"Cliente con RUT {rut} no está registrado en el sistema"
+            app_logger.warning(error_msg)
+            return None, error_msg
             
         except Exception as e:
-            app_logger.error(f"Error al obtener/crear cliente {rut}: {str(e)}")
-            return None
+            error_msg = f"Error al buscar cliente {rut}: {str(e)}"
+            app_logger.error(error_msg)
+            return None, error_msg
     
     def prepare_dato_tributario(self, row: pd.Series, cliente_id: str, 
                                usuario_carga_id: str) -> Dict:
@@ -189,6 +179,7 @@ class CargaMasivaService:
             "pais": row['pais'],
             "factores": factores,
             "subsidiosAplicados": [],
+            "esLocal": False,
             "fechaCreacion": self.get_chile_time(),
             "fechaModificacion": self.get_chile_time(),
             "activo": True
@@ -251,3 +242,54 @@ class CargaMasivaService:
             return False, f"El archivo excede el límite de {Settings.MAX_BATCH_SIZE} registros"
         
         return True, "Validación exitosa"
+    
+    def validate_all_clientes(self, df: pd.DataFrame) -> Dict:
+        """
+        Pre-valida que TODOS los clientes del archivo existan
+        Útil para mostrar errores antes de importar
+        
+        Args:
+            df (pd.DataFrame): DataFrame con los datos a importar
+            
+        Returns:
+            Dict: {
+                "valid": bool,
+                "missing_ruts": List[str],
+                "total_checked": int,
+                "message": str
+            }
+        """
+        try:
+            missing_ruts = []
+            unique_ruts = df['cliente_rut'].unique()
+            
+            app_logger.info(f"Validando {len(unique_ruts)} RUTs únicos...")
+            
+            for rut in unique_ruts:
+                cliente_id, error = self.validate_cliente(rut)
+                if not cliente_id:
+                    missing_ruts.append(rut)
+            
+            if missing_ruts:
+                return {
+                    "valid": False,
+                    "missing_ruts": missing_ruts,
+                    "total_checked": len(unique_ruts),
+                    "message": f"Se encontraron {len(missing_ruts)} RUTs no registrados"
+                }
+            
+            return {
+                "valid": True,
+                "missing_ruts": [],
+                "total_checked": len(unique_ruts),
+                "message": f"Todos los {len(unique_ruts)} RUTs están registrados"
+            }
+            
+        except Exception as e:
+            app_logger.error(f"Error al validar clientes: {str(e)}")
+            return {
+                "valid": False,
+                "missing_ruts": [],
+                "total_checked": 0,
+                "message": f"Error en validación: {str(e)}"
+            }

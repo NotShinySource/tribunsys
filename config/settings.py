@@ -25,7 +25,6 @@ class Settings:
     
     # Colecciones de Firestore
     COLLECTION_USUARIOS = "usuarios"
-    COLLECTION_CLIENTES = "clientes"
     COLLECTION_DATOS_TRIBUTARIOS = "datosTributarios"
     COLLECTION_SUBSIDIOS = "subsidios"
     COLLECTION_REPORTES = "reportes"

@@ -1,8 +1,8 @@
 from datetime import datetime, timezone, timedelta
 from config.firebaseConfig import firebase_config
 from config.settings import Settings
-from utils.encryption import verify_password
 from utils.logger import app_logger
+from utils.encryption import hash_password, verify_password
 from services.firebaseWrapper import requires_connection, safe_firebase_operation
 
 
@@ -56,16 +56,26 @@ class AuthService:
             # Obtener datos del usuario
             user_data = user_doc.to_dict()
             user_data["_id"] = user_doc.id
-            
-            # Verificar contraseña
-            stored_password = user_data.get("contraseña", "")
-            
-            if not verify_password(password, stored_password):
-                app_logger.warning(f"Contraseña incorrecta para RUT: {rut}")
+            email = user_data.get("correo") or user_data.get("email")
+
+            if not email:
+                app_logger.error(f"Usuario {rut} no tiene email/correo registrado")
+                return {
+                    "success": False,
+                    "message": "Error de configuración de cuenta. Contacte al administrador."
+                }
+
+
+            try:
+                auth_response = self.auth_client.sign_in_with_email_and_password(email, password)
+                # Si llega aquí, la autenticación fue exitosa
+            except Exception as auth_error:
+                app_logger.warning(f"Autenticación fallida para RUT: {rut}")
                 return {
                     "success": False,
                     "message": "RUT o contraseña incorrectos"
                 }
+            
             
             # Actualizar último acceso con hora de Chile
             self.usuarios_ref.document(user_doc.id).update({
@@ -107,6 +117,8 @@ class AuthService:
         """
         try:
             rut = user_data.get("rut")
+            password = user_data.get("password")
+            email = user_data.get("correo")
             
             # Verificar si el RUT ya existe
             existing_user = self.usuarios_ref.where("rut", "==", rut).limit(1).get()
@@ -117,20 +129,36 @@ class AuthService:
                     "message": "El RUT ya está registrado en el sistema"
                 }
             
-            # Agregar campos de auditoría con hora de Chile
-            user_data["fechaRegistro"] = self.get_chile_time()
-            user_data["ultimoAcceso"] = None
+            try:
+                auth_user = self.auth_client.create_user_with_email_and_password(email, password)
+                uid = auth_user['localId']
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"Error al crear cuenta de autenticación: {str(e)}"
+                }
             
-            # Crear usuario en Firestore
-            doc_ref = self.usuarios_ref.add(user_data)
-            user_id = doc_ref[1].id
+            user_data_firestore = {
+                "rut": rut,
+                "nombre": user_data.get("nombre"),
+                "apellido_P": user_data.get("apellido_P"),
+                "apellido_M": user_data.get("apellido_M"),
+                "correo": email,
+                "rol": user_data.get("rol", "cliente"),
+                "contraseña": hash_password(password),  # Por seguridad también
+                "fechaRegistro": self.get_chile_time(),
+                "ultimoAcceso": None
+            }
             
-            app_logger.info(f"Usuario registrado exitosamente: {rut}")
+            # ← CRÍTICO: Guardar con UID como document ID
+            self.usuarios_ref.document(uid).set(user_data_firestore)
+            
+            app_logger.info(f"Usuario registrado: {rut} con UID: {uid}")
             
             return {
                 "success": True,
                 "message": "Usuario registrado exitosamente",
-                "user_id": user_id
+                "user_id": uid
             }
         
         except Exception as e:

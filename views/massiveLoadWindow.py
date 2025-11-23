@@ -2,7 +2,7 @@ import os
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QFrame, QFileDialog, QTableWidget, QTableWidgetItem, 
-    QProgressBar, QTextEdit, QMessageBox, QHeaderView, QScrollArea
+    QProgressBar, QTextEdit, QMessageBox, QHeaderView, QScrollArea, QAbstractItemView
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor, QDragEnterEvent, QDropEvent
@@ -259,6 +259,25 @@ class CargaMasivaContent(QWidget):
         layout.addWidget(help_frame)
         
         self.help_frame = help_frame
+
+        help_layout.addSpacing(10)
+
+        warning_label = QLabel(
+            "⚠️ IMPORTANTE: Solo se pueden importar datos de clientes YA REGISTRADOS.\n"
+            "Si un RUT no está registrado, la importación fallará."
+        )
+        warning_label.setFont(QFont("Arial", 9))
+        warning_label.setStyleSheet("""
+            QLabel {
+                color: #856404;
+                background-color: #fff3cd;
+                border: 1px solid #ffc107;
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        warning_label.setWordWrap(True)
+        help_layout.addWidget(warning_label)
     
     def create_info_card(self, title: str, content: str):
         """Crea una tarjeta de información"""
@@ -295,6 +314,7 @@ class CargaMasivaContent(QWidget):
         layout.addWidget(preview_label)
         
         self.preview_table = QTableWidget()
+        self.preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.preview_table.setAlternatingRowColors(True)
         self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.preview_table.setStyleSheet("""
@@ -304,18 +324,70 @@ class CargaMasivaContent(QWidget):
                 background-color: white;
             }
             QHeaderView::section {
-                background-color: #f8f9fa;
-                padding: 5px;
+                background-color: #E94E1B;
+                color: white;
+                padding: 8px;
+                border: none;
                 font-weight: bold;
+                font-size: 10px;
+            }
+            QTableWidget::item {
+                padding: 5px;
             }
         """)
-        self.preview_table.setMaximumHeight(450)  # Valor alto
+        self.preview_table.setMaximumHeight(450)
         self.preview_table.setMinimumHeight(200)
         layout.addWidget(self.preview_table)
         
+        # ← NUEVO: Leyenda de colores
+        legend_frame = QFrame()
+        legend_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        
+        legend_layout = QHBoxLayout()
+        legend_layout.setSpacing(15)
+        
+        legend_label = QLabel("🎨 Leyenda:")
+        legend_label.setFont(QFont("Arial", 9, QFont.Bold))
+        legend_layout.addWidget(legend_label)
+        
+        legends = [
+            ("🟢 Montos", "#e8f5e9"),
+            ("🟡 Factores 8-19", "#fff9c4"),
+            ("🔵 Factores 1-7", "#e3f2fd"),
+            ("🟣 Fechas", "#f3e5f5"),
+            ("🔴 Suma > 1.0", "#ffcdd2")
+        ]
+        
+        for text, color in legends:
+            legend_item = QLabel(text)
+            legend_item.setFont(QFont("Arial", 8))
+            legend_item.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {color};
+                    padding: 3px 8px;
+                    border-radius: 3px;
+                    border: 1px solid {color};
+                }}
+            """)
+            legend_layout.addWidget(legend_item)
+        
+        legend_layout.addStretch()
+        legend_frame.setLayout(legend_layout)
+        layout.addWidget(legend_frame)
+        
         preview_label.hide()
         self.preview_table.hide()
+        legend_frame.hide()  # ← También ocultar leyenda inicialmente
+        
         self.preview_label = preview_label
+        self.legend_frame = legend_frame
     
     def add_validation_area(self, layout):
         validation_label = QLabel("Validaciones:")
@@ -421,6 +493,7 @@ class CargaMasivaContent(QWidget):
     
     def validate_file(self):
         from utils.csvValidator import CSVValidator
+        from services.massiveLoadService import CargaMasivaService  # ← AGREGAR
         
         # Ocultar panel de ayuda cuando se carga archivo
         self.help_frame.hide()
@@ -429,30 +502,17 @@ class CargaMasivaContent(QWidget):
         self.validation_label.show()
         self.validation_text.show()
         
+        # Paso 1: Validar formato CSV
         is_valid, message, df = CSVValidator.validate_file(self.file_path)
         
         self.dataframe = df
-        self.validation_passed = is_valid
         
         self.file_name_label.setText(f"📄 Archivo: {os.path.basename(self.file_path)}")
         self.file_records_label.setText(f"📊 Registros detectados: {len(df) if df is not None else 0}")
         self.info_frame.show()
         
-        if is_valid:
-            self.validation_text.setStyleSheet("""
-                QTextEdit {
-                    border: 1px solid #27ae60;
-                    border-radius: 5px;
-                    padding: 10px;
-                    background-color: #d5f4e6;
-                    color: #27ae60;
-                    font-family: 'Courier New';
-                }
-            """)
-            self.validation_text.setText(f"✅ {message}")
-            self.import_button.setEnabled(True)
-            self.show_preview(df)
-        else:
+        if not is_valid:
+            # Error de formato CSV
             self.validation_text.setStyleSheet("""
                 QTextEdit {
                     border: 1px solid #e74c3c;
@@ -465,15 +525,88 @@ class CargaMasivaContent(QWidget):
             """)
             self.validation_text.setText(f"❌ {message}")
             self.import_button.setEnabled(False)
+            self.validation_passed = False
+            
             if df is not None:
                 self.show_preview(df)
+            
+            self.cancel_button.show()
+            self.import_button.show()
+            return
+        
+        # ← NUEVO: Paso 2: Validar que los clientes existan
+        self.validation_text.setText("⏳ Validando clientes en el sistema...")
+        
+        service = CargaMasivaService()
+        validacion_clientes = service.validate_all_clientes(df)
+        
+        if not validacion_clientes["valid"]:
+            # Clientes faltantes
+            missing_ruts = validacion_clientes["missing_ruts"]
+            
+            error_msg = f"❌ ARCHIVO VÁLIDO PERO:\n\n"
+            error_msg += f"{validacion_clientes['message']}\n\n"
+            error_msg += f"RUTs no registrados ({len(missing_ruts)}):\n"
+            error_msg += "\n".join([f"• {rut}" for rut in missing_ruts[:10]])
+            
+            if len(missing_ruts) > 10:
+                error_msg += f"\n... y {len(missing_ruts) - 10} más."
+            
+            error_msg += "\n\n⚠️ Registre estos clientes antes de importar."
+            
+            self.validation_text.setStyleSheet("""
+                QTextEdit {
+                    border: 1px solid #e74c3c;
+                    border-radius: 5px;
+                    padding: 10px;
+                    background-color: #fadbd8;
+                    color: #e74c3c;
+                    font-family: 'Courier New';
+                    font-size: 12px;
+                }
+            """)
+            self.validation_text.setText(error_msg)
+            self.import_button.setEnabled(False)
+            self.validation_passed = False
+            self.show_preview(df)
+            self.legend_frame.show()
+            
+            self.cancel_button.show()
+            self.import_button.show()
+            return
+        
+        # ✅ TODO VÁLIDO
+        self.validation_text.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #27ae60;
+                border-radius: 5px;
+                padding: 10px;
+                background-color: #d5f4e6;
+                color: #27ae60;
+                font-family: 'Courier New';
+                font-size: 12px;
+            }
+        """)
+        self.validation_text.setText(
+            f"✅ Archivo válido\n"
+            f"✅ {validacion_clientes['message']}\n\n"
+            f"Listo para importar {len(df)} registros."
+        )
+        self.import_button.setEnabled(True)
+        self.validation_passed = True
+        self.show_preview(df)
+        self.legend_frame.show()
         
         self.cancel_button.show()
         self.import_button.show()
     
+    # MODIFICAR el método show_preview() completo:
+
     def show_preview(self, df):
         if df is None or df.empty:
             return
+        
+        from PyQt5.QtGui import QColor
         
         preview_df = df.head(10)
         self.preview_table.setRowCount(len(preview_df))
@@ -483,7 +616,67 @@ class CargaMasivaContent(QWidget):
         for i, row in enumerate(preview_df.itertuples(index=False)):
             for j, value in enumerate(row):
                 item = QTableWidgetItem(str(value))
+                
+                # ← NUEVO: Aplicar colores según tipo de columna
+                col_name = preview_df.columns[j]
+                
+                # Colores para montos
+                if 'monto' in col_name.lower():
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    item.setBackground(QColor(232, 245, 233))  # Verde claro
+                    item.setForeground(QColor(46, 125, 50))     # Verde oscuro
+                
+                # Colores para factores
+                elif 'factor' in col_name.lower():
+                    factor_num = int(col_name.split('_')[1]) if '_' in col_name else 0
+                    
+                    # Factores 8-19 (críticos) - Amarillo
+                    if 8 <= factor_num <= 19:
+                        item.setBackground(QColor(255, 249, 196))  # Amarillo claro
+                        item.setForeground(QColor(245, 124, 0))    # Naranja
+                        item.setTextAlignment(Qt.AlignCenter)
+                    else:
+                        # Factores normales - Azul claro
+                        item.setBackground(QColor(227, 242, 253))  # Azul claro
+                        item.setForeground(QColor(13, 71, 161))    # Azul oscuro
+                        item.setTextAlignment(Qt.AlignCenter)
+                
+                # Colores para fechas
+                elif 'fecha' in col_name.lower():
+                    item.setBackground(QColor(243, 229, 245))  # Púrpura claro
+                    item.setForeground(QColor(106, 27, 154))   # Púrpura oscuro
+                    item.setTextAlignment(Qt.AlignCenter)
+                
+                # Colores para RUT
+                elif 'rut' in col_name.lower():
+                    item.setBackground(QColor(224, 247, 250))  # Cyan claro
+                    item.setForeground(QColor(0, 96, 100))     # Cyan oscuro
+                
+                # Colores para tipo/país
+                elif col_name.lower() in ['tipo_impuesto', 'pais']:
+                    item.setBackground(QColor(255, 243, 224))  # Naranja claro
+                    item.setForeground(QColor(230, 81, 0))     # Naranja oscuro
+                    item.setTextAlignment(Qt.AlignCenter)
+                
                 self.preview_table.setItem(i, j, item)
+        
+        # ← NUEVO: Ajustar ancho de columnas según contenido
+        self.preview_table.resizeColumnsToContents()
+        
+        # ← NUEVO: Validar suma de factores 8-19 y colorear filas
+        for i in range(len(preview_df)):
+            suma_factores = sum(
+                float(preview_df.iloc[i][f'factor_{j}']) 
+                for j in range(8, 20)
+            )
+            
+            # Si la suma > 1.0, colorear toda la fila de rojo
+            if suma_factores > 1.0:
+                for j in range(len(preview_df.columns)):
+                    item = self.preview_table.item(i, j)
+                    if item:
+                        item.setBackground(QColor(255, 205, 210))  # Rojo claro
+                        item.setForeground(QColor(198, 40, 40))    # Rojo oscuro
         
         self.preview_label.show()
         self.preview_table.show()
@@ -503,13 +696,16 @@ class CargaMasivaContent(QWidget):
                 QMessageBox.information(self, "Plantilla Descargada",
                     f"Plantilla guardada en:\n{file_path}")
     
+    # MODIFICAR el método import_data() completo:
+
     def import_data(self):
         """Importa los datos validados a Firebase"""
         if not self.validation_passed or self.dataframe is None:
             return
         
         from services.massiveLoadService import CargaMasivaService
-        from PyQt5.QtCore import QThread
+        
+        # ← YA NO NECESITA validar clientes aquí (ya se validó antes)
         
         # Confirmar importación
         reply = QMessageBox.question(
@@ -526,14 +722,12 @@ class CargaMasivaContent(QWidget):
         self.progress_bar.setValue(0)
         self.import_button.setEnabled(False)
         
-        # Crear servicio
         service = CargaMasivaService()
         
-        # Callback para actualizar progreso
         def update_progress(value):
             self.progress_bar.setValue(value)
         
-        # Importar (esto debería estar en un thread, pero por ahora directo)
+        # Importar
         result = service.import_data(
             self.dataframe,
             self.user_data.get("_id"),
@@ -542,14 +736,69 @@ class CargaMasivaContent(QWidget):
         
         # Mostrar resultados
         if result["success"]:
+            # ← NUEVO: Actualizar área de validación con resumen
+            self.validation_text.setStyleSheet("""
+                QTextEdit {
+                    border: 1px solid #27ae60;
+                    border-radius: 5px;
+                    padding: 10px;
+                    background-color: #d5f4e6;
+                    color: #27ae60;
+                    font-family: 'Courier New';
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+            
+            resumen = f"✅ IMPORTACIÓN COMPLETADA\n\n"
+            resumen += f"📊 Creados: {result['created']}\n"
+            resumen += f"🔄 Actualizados: {result['updated']}\n"
+            resumen += f"❌ Errores: {len(result['errors'])}\n\n"
+            resumen += f"Total procesado: {result['total_processed']} registros"
+            
+            self.validation_text.setText(resumen)
+            
+            # Mostrar notificación
             msg = f"Importación completada!\n\n"
             msg += f"✅ Creados: {result['created']}\n"
             msg += f"🔄 Actualizados: {result['updated']}\n"
             msg += f"❌ Errores: {len(result['errors'])}"
             QMessageBox.information(self, "Importación Exitosa", msg)
+            
+            # ← NUEVO: Auto-reset con delay de 2 segundos
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(2000, self.reset_form)
+            
         else:
-            QMessageBox.warning(self, "Importación con errores", 
-                f"Se procesaron {result['total_processed']} registros con {len(result['errors'])} errores")
+            # Mostrar errores
+            self.validation_text.setStyleSheet("""
+                QTextEdit {
+                    border: 1px solid #e74c3c;
+                    border-radius: 5px;
+                    padding: 10px;
+                    background-color: #fadbd8;
+                    color: #e74c3c;
+                    font-family: 'Courier New';
+                    font-size: 12px;
+                }
+            """)
+            
+            error_detail = "\n".join(result['errors'][:10]) if result['errors'] else "Error desconocido"
+            if len(result['errors']) > 10:
+                error_detail += f"\n... y {len(result['errors']) - 10} errores más."
+            
+            self.validation_text.setText(f"❌ IMPORTACIÓN CON ERRORES\n\n{error_detail}")
+            
+            QMessageBox.warning(
+                self, 
+                "Importación con errores", 
+                f"Se procesaron {result['total_processed']} registros.\n\n"
+                f"Errores:\n{error_detail}"
+            )
+            
+            # ← NUEVO: En caso de error, esperar 5 segundos antes de resetear
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(5000, self.reset_form)
         
         self.import_button.setEnabled(True)
 
@@ -567,3 +816,4 @@ class CargaMasivaContent(QWidget):
         self.progress_bar.hide()
         self.cancel_button.hide()
         self.import_button.hide()
+        self.legend_frame.hide()

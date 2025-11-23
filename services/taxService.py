@@ -13,8 +13,9 @@ class CalificacionTributariaService(FirebaseServiceBase):
     def __init__(self):
         self.db = firebase_config.get_firestore_client()
         self.datos_ref = self.db.collection(Settings.COLLECTION_DATOS_TRIBUTARIOS)
-        self.clientes_ref = self.db.collection(Settings.COLLECTION_CLIENTES)
-    
+        self.clientes_ref = self.db.collection(Settings.COLLECTION_USUARIOS)
+
+    @requires_connection
     def crear_calificacion(self, datos: Dict, usuario_id: str) -> Dict:
         """
         Crea una nueva calificación tributaria LOCAL
@@ -32,10 +33,33 @@ class CalificacionTributariaService(FirebaseServiceBase):
             if not es_valido:
                 return {"success": False, "message": mensaje}
             
-            # Buscar o crear cliente
-            cliente_id = self._get_or_create_cliente(datos.get("cliente_id"))
+            cliente_id, error = self._validate_cliente(datos.get("cliente_id"))
+
             if not cliente_id:
-                return {"success": False, "message": "Error al obtener/crear cliente"}
+                return {
+                    "success": False,
+                    "message": f"No se puede crear la calificación: {error}",
+                    "cliente_no_registrado": True
+                }
+            
+            fecha_str = datos["fecha_declaracion"].strftime("%Y-%m-%d")
+            conflicto = self.buscar_conflicto_oficial(
+                cliente_id,
+                fecha_str,
+                datos["tipo_impuesto"]
+            )
+            
+            if conflicto:
+                return {
+                    "success": False,
+                    "message": "Ya existe una calificación oficial de bolsa con estos datos",
+                    "conflicto": True,
+                    "dato_oficial": {
+                        "id": conflicto["_id"],
+                        "monto": conflicto.get("montoDeclarado", 0),
+                        "fecha": conflicto.get("fechaDeclaracion", "")
+                    }
+                }
             
             # Preparar documento
             calificacion = {
@@ -77,7 +101,7 @@ class CalificacionTributariaService(FirebaseServiceBase):
             app_logger.error(f"Error al crear calificación: {str(e)}")
             return {"success": False, "message": f"Error al crear: {str(e)}"}
     
-    def actualizar_calificacion(self, calificacion_id: str, datos: Dict, usuario_id: str) -> Dict:
+    def actualizar_calificacion(self, calificacion_id: str, datos: Dict, usuario_id: str, rol: str = None) -> Dict:
         """
         Actualiza una calificación LOCAL existente
         
@@ -97,17 +121,22 @@ class CalificacionTributariaService(FirebaseServiceBase):
             
             calificacion_actual = doc.to_dict()
             
-            # Verificar que es LOCAL
-            if not calificacion_actual.get("esLocal", False):
-                return {
-                    "success": False,
-                    "message": "No se puede modificar una calificación de bolsa"
-                }
-            
-            # Verificar que es del usuario (o es admin)
-            if calificacion_actual.get("propietarioRegistroId") != usuario_id:
-                # TODO: Verificar si es admin
-                pass
+            if rol == "administrador":
+                # Admin puede editar TODO (incluso datos de bolsa si es necesario)
+                pass  # Continuar sin restricciones
+            else:
+                # Usuario normal: solo puede editar sus datos locales
+                if not calificacion_actual.get("esLocal", False):
+                    return {
+                        "success": False,
+                        "message": "No se puede modificar una calificación de bolsa"
+                    }
+                
+                if calificacion_actual.get("propietarioRegistroId") != usuario_id:
+                    return {
+                        "success": False,
+                        "message": "No tiene permisos para editar esta calificación"
+                    }
             
             # Validar datos
             es_valido, mensaje = self._validar_datos(datos)
@@ -146,7 +175,7 @@ class CalificacionTributariaService(FirebaseServiceBase):
             app_logger.error(f"Error al actualizar calificación: {str(e)}")
             return {"success": False, "message": f"Error al actualizar: {str(e)}"}
     
-    def eliminar_calificacion(self, calificacion_id: str, usuario_id: str) -> Dict:
+    def eliminar_calificacion(self, calificacion_id: str, usuario_id: str, rol: str = None) -> Dict:
         """
         Elimina (desactiva) una calificación LOCAL
         
@@ -165,12 +194,22 @@ class CalificacionTributariaService(FirebaseServiceBase):
             
             calificacion = doc.to_dict()
             
-            # Verificar que es LOCAL
-            if not calificacion.get("esLocal", False):
-                return {
-                    "success": False,
-                    "message": "No se puede eliminar una calificación de bolsa"
-                }
+            if rol == "administrador":
+                # Admin puede eliminar TODO
+                pass  # Continuar sin restricciones
+            else:
+                # Usuario normal: solo puede eliminar sus datos locales
+                if not calificacion.get("esLocal", False):
+                    return {
+                        "success": False,
+                        "message": "No se puede eliminar una calificación de bolsa"
+                    }
+                
+                if calificacion.get("propietarioRegistroId") != usuario_id:
+                    return {
+                        "success": False,
+                        "message": "No tiene permisos para eliminar esta calificación"
+                    }
             
             # Soft delete (marcar como inactivo)
             self.datos_ref.document(calificacion_id).update({
@@ -221,12 +260,53 @@ class CalificacionTributariaService(FirebaseServiceBase):
             app_logger.error(f"Error al obtener calificación: {str(e)}")
             return None
     
-    def listar_calificaciones(self, usuario_id: str, filtros: Optional[Dict] = None) -> List[Dict]:
+    def buscar_conflicto_oficial(self, cliente_id: str, fecha: str, tipo_impuesto: str) -> Optional[Dict]:
+        """
+        Busca si existe un dato oficial (bolsa) para los mismos parámetros
+        
+        Args:
+            cliente_id (str): ID del cliente
+            fecha (str): Fecha de declaración (formato YYYY-MM-DD)
+            tipo_impuesto (str): Tipo de impuesto
+            
+        Returns:
+            Dict: Datos del documento oficial si existe, None si no
+        """
+        try:
+            # Convertir fecha a string si es necesario
+            if hasattr(fecha, 'strftime'):
+                fecha_str = fecha.strftime("%Y-%m-%d")
+            else:
+                fecha_str = str(fecha)
+            
+            query = self.datos_ref.where("clienteId", "==", cliente_id)\
+                                .where("fechaDeclaracion", "==", fecha_str)\
+                                .where("tipoImpuesto", "==", tipo_impuesto)\
+                                .where("esLocal", "==", False)\
+                                .where("activo", "==", True)\
+                                .limit(1)
+            
+            results = query.stream()
+            
+            for doc in results:
+                data = doc.to_dict()
+                data["_id"] = doc.id
+                return data
+            
+            return None
+            
+        except Exception as e:
+            app_logger.error(f"Error al buscar conflicto oficial: {str(e)}")
+            return None
+
+    
+    def listar_calificaciones(self, usuario_id: str, rol: str = None, filtros: Optional[Dict] = None) -> List[Dict]:
         """
         Lista las calificaciones del usuario (locales + bolsa)
         
         Args:
             usuario_id (str): ID del usuario
+            rol (str): Rol del usuario (administrador, analista_mercado, etc.)
             filtros (Dict): Filtros opcionales
             
         Returns:
@@ -263,16 +343,20 @@ class CalificacionTributariaService(FirebaseServiceBase):
                 data = doc.to_dict()
                 data["_id"] = doc.id
                 
-                # Incluir si:
-                # 1. Es de bolsa (esLocal=False) -> todos la ven
-                # 2. Es local del usuario (propietarioRegistroId == usuario_id)
                 es_local = data.get("esLocal", False)
                 es_propietario = data.get("propietarioRegistroId") == usuario_id
                 
-                if not es_local or es_propietario:
+                if rol == "administrador":
+                    # Admin ve TODAS las calificaciones
+                    calificaciones.append(data)
+                elif not es_local:
+                    # Datos de bolsa: TODOS los ven
+                    calificaciones.append(data)
+                elif es_propietario:
+                    # Datos locales: solo el propietario
                     calificaciones.append(data)
             
-            app_logger.info(f"Listadas {len(calificaciones)} calificaciones")
+            app_logger.info(f"Listadas {len(calificaciones)} calificaciones para rol {rol}")
             return calificaciones
         
         except Exception as e:
@@ -313,36 +397,34 @@ class CalificacionTributariaService(FirebaseServiceBase):
         """Convierte lista de factores a diccionario"""
         return {f"factor_{i}": float(factores[i-1]) for i in range(1, 20)}
     
-    def _get_or_create_cliente(self, cliente_rut: str) -> Optional[str]:
-        """Busca o crea un cliente por RUT"""
+    def _validate_cliente(self, rut: str) -> tuple:
+        """
+        Valida que un cliente exista en la base de datos
+        NO CREA clientes nuevos
+        
+        Args:
+            rut (str): RUT del cliente
+            
+        Returns:
+            tuple: (cliente_id, error_message)
+                Si existe: (cliente_id, None)
+                Si no existe: (None, "mensaje de error")
+        """
         try:
             # Buscar cliente existente
-            query = self.clientes_ref.where("rut", "==", cliente_rut).limit(1)
+            query = self.clientes_ref.where("rut", "==", rut).limit(1)
             results = query.stream()
             
             for doc in results:
-                return doc.id
+                app_logger.debug(f"Cliente encontrado: {rut}")
+                return doc.id, None
             
-            # Si no existe, crear cliente básico
-            nuevo_cliente = {
-                "rut": cliente_rut,
-                "nombre": "Cliente",
-                "apellido_P": "Importado",
-                "apellido_M": "",
-                "correo": f"{cliente_rut.replace('-', '')}@temp.com",
-                "razon_social": f"Cliente {cliente_rut}",
-                "sector_economico": "No especificado",
-                "direccion": "",
-                "pais": "Chile",
-                "fecha_creacion": datetime.now()
-            }
+            # Cliente NO existe
+            error_msg = f"Cliente con RUT {rut} no está registrado en el sistema"
+            app_logger.warning(error_msg)
+            return None, error_msg
             
-            doc_ref = self.clientes_ref.add(nuevo_cliente)
-            cliente_id = doc_ref[1].id
-            
-            app_logger.info(f"Cliente creado automáticamente: {cliente_rut}")
-            return cliente_id
-        
         except Exception as e:
-            app_logger.error(f"Error al obtener/crear cliente: {str(e)}")
-            return None
+            error_msg = f"Error al buscar cliente {rut}: {str(e)}"
+            app_logger.error(error_msg)
+            return None, error_msg

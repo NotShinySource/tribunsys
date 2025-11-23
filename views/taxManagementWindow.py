@@ -333,18 +333,35 @@ class CalificacionFormDialog(QDialog):
                 return
             
             usuario_id = self.user_data.get("_id")
+            user_rol = self.user_data.get("rol", "cliente")
             
             if self.modo == "crear":
                 result = self.service.crear_calificacion(datos, usuario_id)
+                
+                # ← NUEVO: Manejar conflicto
+                if not result["success"] and result.get("conflicto", False):
+                    dato_oficial = result.get("dato_oficial", {})
+                    
+                    reply = QMessageBox.warning(
+                        self,
+                        "⚠️ Conflicto con Dato Oficial",
+                        f"Ya existe una calificación OFICIAL de bolsa:\n\n"
+                        f"• Monto: ${dato_oficial.get('monto', 0):,.2f}\n"
+                        f"• Fecha: {dato_oficial.get('fecha', 'N/A')}\n\n"
+                        f"No se puede crear una calificación local duplicada.\n"
+                        f"Cambie la fecha o el tipo de impuesto.",
+                        QMessageBox.Ok
+                    )
+                    return
             else:
                 result = self.service.actualizar_calificacion(
                     self.calificacion["_id"],
                     datos,
-                    usuario_id
+                    usuario_id,
+                    user_rol  # ← NUEVO: Pasar rol
                 )
             
             if result["success"]:
-                QMessageBox.information(self, "Éxito", result["message"])
                 self.accept()
             else:
                 QMessageBox.warning(self, "Error", result["message"])
@@ -430,6 +447,7 @@ class GestionCalificacionesContent(QWidget):
     def __init__(self, user_data: dict, parent=None):
         super().__init__(parent)
         self.user_data = user_data
+        self.user_rol = user_data.get("rol", "cliente")
         self.service = CalificacionTributariaService()
         self.calificaciones = []
         
@@ -536,6 +554,24 @@ class GestionCalificacionesContent(QWidget):
             QPushButton:hover { background-color: #2980b9; }
         """)
         toolbar_layout.addWidget(btn_refrescar)
+
+        if self.user_rol == "administrador":
+            btn_limpiar = QPushButton("🗑️ Limpiar Todo")
+            btn_limpiar.setFont(QFont("Arial", 10))
+            btn_limpiar.setMinimumHeight(40)
+            btn_limpiar.setCursor(QCursor(Qt.PointingHandCursor))
+            btn_limpiar.clicked.connect(self.limpiar_todas_calificaciones)
+            btn_limpiar.setStyleSheet("""
+                QPushButton {
+                    background-color: #e74c3c;
+                    color: white;
+                    border: none;
+                    border-radius: 5px;
+                    padding: 10px 20px;
+                }
+                QPushButton:hover { background-color: #c0392b; }
+            """)
+            toolbar_layout.addWidget(btn_limpiar)
         
         toolbar_layout.addStretch()
         
@@ -658,7 +694,12 @@ class GestionCalificacionesContent(QWidget):
     
     def add_footer(self, layout):
         """Footer"""
-        footer = QLabel("💡 Tip: Solo puedes editar/eliminar calificaciones locales")
+        if self.user_rol == "administrador":
+            footer_text = "💡 Admin: Puedes ver, editar y eliminar TODAS las calificaciones (locales y de bolsa)"
+        else:
+            footer_text = "💡 Tip: Solo puedes editar/eliminar tus calificaciones locales. Los datos de bolsa son de solo lectura."
+        
+        footer = QLabel(footer_text)
         footer.setFont(QFont("Arial", 8))
         footer.setStyleSheet("color: #7f8c8d;")
         layout.addWidget(footer)
@@ -709,6 +750,7 @@ class GestionCalificacionesContent(QWidget):
             
             # Estado
             es_local = cal.get("esLocal", False)
+            es_admin = self.user_rol == "administrador"
             estado = "Local" if es_local else "Bolsa"
             item_estado = QTableWidgetItem(estado)
             item_estado.setTextAlignment(Qt.AlignCenter)
@@ -724,8 +766,8 @@ class GestionCalificacionesContent(QWidget):
             
             # Botón Editar
             btn_editar = QPushButton("✏️")
-            btn_editar.setEnabled(es_local)
-            btn_editar.setCursor(QCursor(Qt.PointingHandCursor) if es_local else QCursor(Qt.ForbiddenCursor))
+            btn_editar.setEnabled(es_admin or es_local)
+            btn_editar.setCursor(QCursor(Qt.PointingHandCursor) if (es_admin or es_local) else QCursor(Qt.ForbiddenCursor))
             btn_editar.clicked.connect(lambda checked, c=cal: self.abrir_formulario_editar(c))
             btn_editar.setStyleSheet("""
                 QPushButton {
@@ -745,8 +787,8 @@ class GestionCalificacionesContent(QWidget):
             
             # Botón Eliminar
             btn_eliminar = QPushButton("🗑️")
-            btn_eliminar.setEnabled(es_local)
-            btn_eliminar.setCursor(QCursor(Qt.PointingHandCursor) if es_local else QCursor(Qt.ForbiddenCursor))
+            btn_eliminar.setEnabled(es_admin or es_local)  # ← CAMBIO AQUÍ
+            btn_eliminar.setCursor(QCursor(Qt.PointingHandCursor) if (es_admin or es_local) else QCursor(Qt.ForbiddenCursor))
             btn_eliminar.clicked.connect(lambda checked, c=cal: self.eliminar_calificacion(c))
             btn_eliminar.setStyleSheet("""
                 QPushButton {
@@ -775,7 +817,11 @@ class GestionCalificacionesContent(QWidget):
     
     def abrir_formulario_editar(self, calificacion: dict):
         """Abre formulario de edición"""
-        if not calificacion.get("esLocal", False):
+        es_local = calificacion.get("esLocal", False)
+        es_admin = self.user_rol == "administrador"
+        
+        # ← NUEVO: Solo advertir si NO es admin y NO es local
+        if not es_admin and not es_local:
             QMessageBox.warning(
                 self,
                 "Acción no permitida",
@@ -791,7 +837,11 @@ class GestionCalificacionesContent(QWidget):
     
     def eliminar_calificacion(self, calificacion: dict):
         """Elimina una calificación"""
-        if not calificacion.get("esLocal", False):
+        es_local = calificacion.get("esLocal", False)
+        es_admin = self.user_rol == "administrador"
+        
+        # ← NUEVO: Solo advertir si NO es admin y NO es local
+        if not es_admin and not es_local:
             QMessageBox.warning(
                 self,
                 "Acción no permitida",
@@ -799,19 +849,35 @@ class GestionCalificacionesContent(QWidget):
             )
             return
         
-        reply = QMessageBox.question(
-            self,
-            "Confirmar Eliminación",
-            f"¿Está seguro de eliminar esta calificación?\n\n"
-            f"Cliente: {calificacion.get('clienteId', 'N/A')}\n"
-            f"Fecha: {calificacion.get('fechaDeclaracion', 'N/A')}",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        # ← NUEVO: Advertencia especial si admin elimina dato de bolsa
+        if es_admin and not es_local:
+            reply = QMessageBox.warning(
+                self,
+                "⚠️ ADVERTENCIA: Eliminar Dato de Bolsa",
+                f"Está a punto de eliminar un DATO OFICIAL DE BOLSA.\n\n"
+                f"Cliente: {calificacion.get('clienteId', 'N/A')}\n"
+                f"Fecha: {calificacion.get('fechaDeclaracion', 'N/A')}\n\n"
+                f"Esta acción debe ser justificada y registrada.\n"
+                f"¿Está seguro?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No  # No por defecto
+            )
+        else:
+            # Usuario normal eliminando su dato local
+            reply = QMessageBox.question(
+                self,
+                "Confirmar Eliminación",
+                f"¿Está seguro de eliminar esta calificación?\n\n"
+                f"Cliente: {calificacion.get('clienteId', 'N/A')}\n"
+                f"Fecha: {calificacion.get('fechaDeclaracion', 'N/A')}",
+                QMessageBox.Yes | QMessageBox.No
+            )
         
         if reply == QMessageBox.Yes:
             result = self.service.eliminar_calificacion(
                 calificacion["_id"],
-                self.user_data.get("_id")
+                self.user_data.get("_id"),
+                self.user_rol  # ← NUEVO: Pasar rol
             )
             
             if result["success"]:
@@ -837,6 +903,7 @@ class GestionCalificacionesContent(QWidget):
         
         calificaciones = self.service.listar_calificaciones(
             self.user_data.get("_id"),
+            self.user_rol,
             filtros
         )
         self.actualizar_tabla(calificaciones)
@@ -852,6 +919,55 @@ class GestionCalificacionesContent(QWidget):
     def refrescar_tabla(self):
         """Refresca la tabla"""
         calificaciones = self.service.listar_calificaciones(
-            self.user_data.get("_id")
+            self.user_data.get("_id"),
+            self.user_rol
         )
         self.actualizar_tabla(calificaciones)
+
+    # AL FINAL de GestionCalificacionesContent:
+
+    def limpiar_todas_calificaciones(self):
+        """Elimina TODAS las calificaciones (solo admin)"""
+        reply = QMessageBox.warning(
+            self,
+            "⚠️ ADVERTENCIA CRÍTICA",
+            f"Está a punto de ELIMINAR TODAS las calificaciones del sistema.\n\n"
+            f"Total actual: {len(self.calificaciones)} calificaciones\n\n"
+            f"Esta acción NO se puede deshacer.\n"
+            f"¿Está COMPLETAMENTE seguro?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Confirmar nuevamente
+            reply2 = QMessageBox.critical(
+                self,
+                "ÚLTIMA CONFIRMACIÓN",
+                "Escriba 'ELIMINAR TODO' para confirmar:",
+                QMessageBox.Ok | QMessageBox.Cancel
+            )
+            
+            if reply2 == QMessageBox.Ok:
+                # Eliminar todas
+                errores = 0
+                eliminadas = 0
+                
+                for cal in self.calificaciones:
+                    result = self.service.eliminar_calificacion(
+                        cal["_id"],
+                        self.user_data.get("_id"),
+                        self.user_rol
+                    )
+                    if result["success"]:
+                        eliminadas += 1
+                    else:
+                        errores += 1
+                
+                QMessageBox.information(
+                    self,
+                    "Limpieza Completada",
+                    f"✅ Eliminadas: {eliminadas}\n❌ Errores: {errores}"
+                )
+                
+                self.refrescar_tabla()
