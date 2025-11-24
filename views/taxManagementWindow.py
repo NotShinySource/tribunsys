@@ -77,7 +77,11 @@ class CalificacionFormDialog(QDialog):
         self.setLayout(main_layout)
         self.apply_styles()
 
-        if self.modo == "editar" and self.calificacion and not self.calificacion.get("esLocal", False):
+        # ✅ FIX: Solo establecer modo lectura si NO es admin Y es dato de bolsa
+        user_rol = self.user_data.get("rol", "cliente")
+        es_bolsa = not self.calificacion.get("esLocal", False) if self.calificacion else False
+        
+        if self.modo == "editar" and es_bolsa and user_rol != "administrador":
             self.establecer_solo_lectura()
 
     def add_seccion_general(self, layout):
@@ -257,7 +261,20 @@ class CalificacionFormDialog(QDialog):
         if not self.calificacion:
             return
 
-        self.input_cliente.setText(self.calificacion.get("clienteId", ""))
+        cliente_id = self.calificacion.get("clienteId", "")
+        
+        # Si es una lista, tomar el primer elemento
+        if isinstance(cliente_id, list):
+            if len(cliente_id) > 0:
+                cliente_id = str(cliente_id[0])
+            else:
+                cliente_id = ""
+        elif cliente_id is None:
+            cliente_id = ""
+        else:
+            cliente_id = str(cliente_id)
+        
+        self.input_cliente.setText(cliente_id)
 
         fecha_str = self.calificacion.get("fechaDeclaracion", "")
         if fecha_str:
@@ -379,8 +396,9 @@ class CalificacionFormDialog(QDialog):
             factores = [spinbox.value() for spinbox in self.factor_inputs]
             datos["factores"] = factores
 
-            # pasar subsidios seleccionados
-            datos["subsidios_aplicados"] = self._gather_selected_subsidios_ids()
+            # ✅ FIX: Pasar subsidios como lista de IDs de string
+            subsidios_ids = self._gather_selected_subsidios_ids()
+            datos["subsidios_aplicados"] = subsidios_ids
 
             if not datos["cliente_id"]:
                 QMessageBox.warning(self, "Validación", "El RUT del cliente es obligatorio")
@@ -390,7 +408,8 @@ class CalificacionFormDialog(QDialog):
             user_rol = self.user_data.get("rol", "cliente")
 
             if self.modo == "crear":
-                result = self.service.crear_calificacion(datos, usuario_id)
+                # ✅ FIX: Pasar corredor_id al servicio
+                result = self.service.crear_calificacion(datos, usuario_id, self.corredor_id)
                 if not result["success"] and result.get("conflicto", False):
                     dato_oficial = result.get("dato_oficial", {})
                     QMessageBox.warning(
@@ -404,11 +423,13 @@ class CalificacionFormDialog(QDialog):
                     )
                     return
             else:
+                # ✅ FIX: Pasar corredor_id al servicio
                 result = self.service.actualizar_calificacion(
                     self.calificacion["_id"],
                     datos,
                     usuario_id,
-                    user_rol
+                    user_rol,
+                    self.corredor_id
                 )
 
             if result["success"]:
@@ -793,9 +814,44 @@ class GestionCalificacionesContent(QWidget):
             # Columna 4: País
             self.table.setItem(row, 4, QTableWidgetItem(cal.get("pais", "")))
 
-            # Columna 5: Monto declarado
-            monto = cal.get("montoDeclarado", 0)
-            item_monto = QTableWidgetItem(f"${monto:,.2f}")
+            # Columna 5: Monto (mostrar el ajustado si existe, sino el declarado)
+            monto_declarado = cal.get("montoDeclarado", 0)
+            monto_con_subsidios = cal.get("montoConSubsidios")  # ✅ Este campo lo guarda el servicio
+
+            # Si existe monto con subsidios y es diferente, mostrarlo
+            if monto_con_subsidios is not None and monto_con_subsidios != monto_declarado:
+                item_monto = QTableWidgetItem(f"${monto_con_subsidios:,.2f}")
+                item_monto.setForeground(QColor(22, 160, 133))  # Verde
+                item_monto.setFont(QFont("Arial", 10, QFont.Bold))
+                
+                # Tooltip con información detallada
+                subsidios_aplicados = cal.get("subsidiosAplicados", [])
+                tooltip = f"💰 Monto Original: ${monto_declarado:,.2f}\n"
+                tooltip += f"✅ Monto con Subsidios: ${monto_con_subsidios:,.2f}\n"
+                tooltip += f"📉 Descuento Total: ${(monto_declarado - monto_con_subsidios):,.2f}\n"
+                
+                if subsidios_aplicados:
+                    tooltip += f"\n📋 Subsidios Aplicados ({len(subsidios_aplicados)}):\n"
+                    for sub in subsidios_aplicados:
+                        nombre = sub.get("nombre_subsidio", "Sin nombre")
+                        valor_pct = sub.get("valor_porcentual", "0")
+                        
+                        # ✅ Convertir a float de forma segura
+                        try:
+                            if isinstance(valor_pct, str):
+                                pct = float(valor_pct) * 100
+                            else:
+                                pct = float(valor_pct) * 100
+                        except (ValueError, TypeError):
+                            pct = 0.0
+                            
+                        tooltip += f"  • {nombre}: {pct:.2f}%\n"
+                
+                item_monto.setToolTip(tooltip)
+            else:
+                # Sin subsidios, mostrar monto normal
+                item_monto = QTableWidgetItem(f"${monto_declarado:,.2f}")
+
             item_monto.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row, 5, item_monto)
 
@@ -827,16 +883,66 @@ class GestionCalificacionesContent(QWidget):
             self.table.setItem(row, 7, item_estado)
 
             # Columna 8: Botón Editar
+            btn_editar_widget = QWidget()
+            btn_editar_layout = QHBoxLayout(btn_editar_widget)
+            btn_editar_layout.setContentsMargins(5, 5, 5, 5)
+            btn_editar_layout.setAlignment(Qt.AlignCenter)
+
             btn_editar = QPushButton("✏️")
+            btn_editar.setCursor(QCursor(Qt.PointingHandCursor))
+            btn_editar.setFixedSize(35, 35)  # Tamaño fijo
+            btn_editar.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+                QPushButton:disabled {
+                    background-color: #bdc3c7;
+                    color: #7f8c8d;
+                }
+            """)
             btn_editar.setEnabled(es_admin or es_local)
             btn_editar.clicked.connect(lambda checked, c=cal: self.abrir_formulario_editar(c))
-            self.table.setCellWidget(row, 8, btn_editar)
+
+            btn_editar_layout.addWidget(btn_editar)
+            self.table.setCellWidget(row, 8, btn_editar_widget)
 
             # Columna 9: Botón Eliminar
+            btn_eliminar_widget = QWidget()
+            btn_eliminar_layout = QHBoxLayout(btn_eliminar_widget)
+            btn_eliminar_layout.setContentsMargins(5, 5, 5, 5)
+            btn_eliminar_layout.setAlignment(Qt.AlignCenter)
+
             btn_eliminar = QPushButton("🗑️")
+            btn_eliminar.setCursor(QCursor(Qt.PointingHandCursor))
+            btn_eliminar.setFixedSize(35, 35)  # Tamaño fijo
+            btn_eliminar.setStyleSheet("""
+                QPushButton {
+                    background-color: #e74c3c;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: #c0392b;
+                }
+                QPushButton:disabled {
+                    background-color: #bdc3c7;
+                    color: #7f8c8d;
+                }
+            """)
             btn_eliminar.setEnabled(es_admin or es_local)
             btn_eliminar.clicked.connect(lambda checked, c=cal: self.eliminar_calificacion(c))
-            self.table.setCellWidget(row, 9, btn_eliminar)
+
+            btn_eliminar_layout.addWidget(btn_eliminar)
+            self.table.setCellWidget(row, 9, btn_eliminar_widget)
 
         self.label_contador.setText(f"Total: {len(calificaciones)} calificaciones")
 
