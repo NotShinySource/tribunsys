@@ -412,7 +412,10 @@ class CalificacionTributariaService(FirebaseServiceBase):
         """
         try:
             # Buscar cliente existente
-            query = self.clientes_ref.where("rut", "==", rut).limit(1)
+            query = self.clientes_ref\
+                .where("rut", "==", rut)\
+                .where("rol", "==", "cliente")\
+                .limit(1)
             results = query.stream()
             
             for doc in results:

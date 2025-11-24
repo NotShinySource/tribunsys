@@ -453,6 +453,33 @@ class GestionCalificacionesContent(QWidget):
         
         self.init_ui()
         self.refrescar_tabla()
+
+    def obtener_rut_cliente(self, cliente_id: str) -> str:
+        """
+        Obtiene el RUT de un cliente dado su ID de Firebase
+        
+        Args:
+            cliente_id (str): ID del cliente en Firebase
+            
+        Returns:
+            str: RUT del cliente o "Cliente no encontrado"
+        """
+        try:
+            from config.firebaseConfig import firebase_config
+            db = firebase_config.get_firestore_client()
+            
+            # Buscar cliente por ID
+            doc = db.collection("usuarios").document(cliente_id).get()
+            
+            if doc.exists:
+                data = doc.to_dict()
+                return data.get("rut", "RUT no disponible")
+            else:
+                return "Cliente no encontrado"
+        
+        except Exception as e:
+            app_logger.error(f"Error al obtener RUT: {str(e)}")
+            return "Error al cargar"
     
     def init_ui(self):
         """Inicializa la interfaz"""
@@ -715,7 +742,9 @@ class GestionCalificacionesContent(QWidget):
             self.table.setItem(row, 0, item_id)
             
             # Cliente
-            self.table.setItem(row, 1, QTableWidgetItem(cal.get("clienteId", "")))
+            cliente_id = cal.get("clienteId", "")
+            rut_cliente = self.obtener_rut_cliente(cliente_id)
+            self.table.setItem(row, 1, QTableWidgetItem(rut_cliente))
             
             # Fecha
             fecha_str = cal.get("fechaDeclaracion", "")

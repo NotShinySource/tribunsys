@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         self.create_home_page()
         self.create_carga_masiva_page()
         self.create_gestionar_calificaciones_page()
+        self.create_reportes_page()
         
         # Mostrar página de inicio
         self.content_stack.setCurrentIndex(0)
@@ -133,6 +134,14 @@ class MainWindow(QMainWindow):
         gestion_cal_widget = GestionCalificacionesContent(self.user_data)
         gestion_cal_widget.back_requested.connect(self.show_home)
         self.content_stack.addWidget(gestion_cal_widget)
+
+    def create_reportes_page(self):
+        """Crea la página de reportes"""
+        from views.reportsWindow import GenerarReportesContent
+
+        reportes_widget = GenerarReportesContent(self.user_data)
+        reportes_widget.back_requested.connect(self.show_home)
+        self.content_stack.addWidget(reportes_widget)
     
     def show_home(self):
         """Muestra la página de inicio"""
@@ -153,6 +162,14 @@ class MainWindow(QMainWindow):
             return
 
         self.content_stack.setCurrentIndex(2)
+
+    def show_reportes(self):
+        """Muestra la página de reportes"""
+    
+        if not self.check_connection_before_operation("Generar Reportes"):
+            return
+        
+        self.content_stack.setCurrentIndex(3)  # ← Índice 3 porque es la 4ta página
     
     def add_header(self, layout):
         """Agrega el header con logo y menú de usuario - SIN LÍNEAS"""
@@ -463,6 +480,8 @@ class MainWindow(QMainWindow):
             self.show_carga_masiva()
         elif module_id == "calificaciones":
             self.show_gestionar_calificaciones()
+        elif module_id == "reportes":
+            self.show_reportes()
         else:
             # TODO: Implementar otros módulos
             self.show_home()

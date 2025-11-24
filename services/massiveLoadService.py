@@ -70,7 +70,7 @@ class CargaMasivaService:
                 )
                 
                 # Verificar si ya existe (upsert)
-                existing_id = self.find_existing_dato(
+                existing_id = self.find_existing_dato_bolsa(
                     cliente_id,
                     row['fecha_declaracion'],
                     row['tipo_impuesto']
@@ -80,12 +80,12 @@ class CargaMasivaService:
                     # Actualizar existente
                     self.datos_ref.document(existing_id).update(dato_tributario)
                     updated_count += 1
-                    app_logger.debug(f"Registro actualizado: {existing_id}")
+                    app_logger.debug(f"Dato de bolsa actualizado: {existing_id}")
                 else:
                     # Crear nuevo
                     self.datos_ref.add(dato_tributario)
                     created_count += 1
-                    app_logger.debug(f"Registro creado para cliente {cliente_id}")
+                    app_logger.debug(f"Nuevo dato de bolsa creado para cliente {cliente_id}")
                 
             except Exception as e:
                 error_msg = f"Fila {idx + 2}: {str(e)}"
@@ -133,7 +133,10 @@ class CargaMasivaService:
         """
         try:
             # Buscar cliente existente
-            query = self.clientes_ref.where("rut", "==", rut).limit(1)
+            query = self.clientes_ref\
+                .where("rut", "==", rut)\
+                .where("rol", "==", "cliente")\
+                .limit(1)
             results = query.stream()
             
             for doc in results:
@@ -222,6 +225,45 @@ class CargaMasivaService:
             
         except Exception as e:
             app_logger.error(f"Error al buscar dato existente: {str(e)}")
+            return None
+    
+    def find_existing_dato_bolsa(self, cliente_id: str, fecha: str, tipo_impuesto: str) -> str:
+        """
+        Busca si ya existe un dato de BOLSA (no local) con los mismos criterios
+        Esto asegura que la carga masiva solo actualice datos de bolsa, no locales
+        
+        Args:
+            cliente_id (str): ID del cliente
+            fecha (str): Fecha de declaración
+            tipo_impuesto (str): Tipo de impuesto
+            
+        Returns:
+            str: ID del documento si existe, None si no existe
+        """
+        try:
+            # Convertir fecha a string
+            if isinstance(fecha, pd.Timestamp):
+                fecha_str = fecha.strftime("%Y-%m-%d")
+            else:
+                fecha_str = str(fecha)
+            
+            # ← CLAVE: Buscar SOLO datos con esLocal=False (bolsa)
+            query = self.datos_ref\
+                .where("clienteId", "==", cliente_id)\
+                .where("fechaDeclaracion", "==", fecha_str)\
+                .where("tipoImpuesto", "==", tipo_impuesto)\
+                .where("esLocal", "==", False)\
+                .limit(1)
+            
+            results = query.stream()
+            
+            for doc in results:
+                return doc.id
+            
+            return None
+            
+        except Exception as e:
+            app_logger.error(f"Error al buscar dato de bolsa: {str(e)}")
             return None
     
     def validate_before_import(self, df: pd.DataFrame) -> Tuple[bool, str]:
