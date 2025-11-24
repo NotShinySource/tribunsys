@@ -64,10 +64,13 @@ class MainWindow(QMainWindow):
         self.content_layout.addWidget(self.content_stack)
         
         # Crear páginas
-        self.create_home_page()
-        self.create_carga_masiva_page()
-        self.create_gestionar_calificaciones_page()
-        self.create_reportes_page()
+        self.create_home_page()                      # Index 0
+        self.create_carga_masiva_page()              # Index 1
+        self.create_gestionar_calificaciones_page()  # Index 2
+        self.create_gestionar_subsidios_page()       # Index 3
+        self.create_reportes_page()                  # Index 4 
+        self.create_consultar_page()                 # Index 5 
+        self.create_usuarios_page()
         
         # Mostrar página de inicio
         self.content_stack.setCurrentIndex(0)
@@ -135,14 +138,66 @@ class MainWindow(QMainWindow):
         gestion_cal_widget.back_requested.connect(self.show_home)
         self.content_stack.addWidget(gestion_cal_widget)
 
-    def create_reportes_page(self):
-        """Crea la página de reportes"""
-        from views.reportsWindow import GenerarReportesContent
+    def create_gestionar_subsidios_page(self):
+        """Crea la página de gestión de subsidios y la añade al stack"""
+        try:
+            from views.subsidiesWindow import SubsidiosWindow
+        except Exception as e:
+            from utils.logger import app_logger
+            app_logger.error(f"No se pudo importar SubsidiosWindow: {e}")
+            return
 
-        reportes_widget = GenerarReportesContent(self.user_data)
-        reportes_widget.back_requested.connect(self.show_home)
-        self.content_stack.addWidget(reportes_widget)
-    
+        try:
+            subsidios_widget = SubsidiosWindow(self.user_data)
+            subsidios_widget.back_requested.connect(self.show_home)
+            self.content_stack.addWidget(subsidios_widget)
+        except Exception as e:
+            from utils.logger import app_logger
+            app_logger.error(f"Error creando instancia de SubsidiosWindow: {e}")
+
+    def create_reportes_page(self):
+        """Crea la página de generación de reportes - NUEVO"""
+        try:
+            from views.reportsWindow import GenerarReportesContent
+            
+            reportes_widget = GenerarReportesContent(self.user_data)
+            reportes_widget.back_requested.connect(self.show_home)
+            self.content_stack.addWidget(reportes_widget)
+        except Exception as e:
+            from utils.logger import app_logger
+            app_logger.error(f"Error creando página de reportes: {e}")
+
+    def create_consultar_page(self):
+
+        try:
+            from views.queryWindow import ConsultarDatosContent
+            
+            consultar_widget = ConsultarDatosContent(self.user_data)
+            consultar_widget.back_requested.connect(self.show_home)
+            self.content_stack.addWidget(consultar_widget)
+        except Exception as e:
+            from utils.logger import app_logger
+            app_logger.error(f"Error creando página de consulta: {e}")
+
+    def create_usuarios_page(self):
+
+        try:
+            from views.userManagementWindow import GestionUsuariosContent
+            
+            usuarios_widget = GestionUsuariosContent(self.user_data)
+            usuarios_widget.back_requested.connect(self.show_home)
+            self.content_stack.addWidget(usuarios_widget)
+        except Exception as e:
+            from utils.logger import app_logger
+            app_logger.error(f"Error creando página de usuarios: {e}")
+
+    def show_usuarios(self):
+        """Muestra la página de gestión de usuarios"""
+        if not self.check_connection_before_operation("Gestión de Usuarios"):
+            return
+
+        self.content_stack.setCurrentIndex(6)
+
     def show_home(self):
         """Muestra la página de inicio"""
         self.content_stack.setCurrentIndex(0)
@@ -163,13 +218,42 @@ class MainWindow(QMainWindow):
 
         self.content_stack.setCurrentIndex(2)
 
+    def show_gestionar_subsidios(self):
+        """Muestra la página de gestión de subsidios"""
+        if not self.check_connection_before_operation("Gestionar Subsidios"):
+            return
+
+        # Intentar seleccionar la página correspondiente en el stack.
+        # Asumimos que fue añadida después de las otras páginas; si no, la buscamos por tipo.
+        # Preferimos localizar por nombre de clase agregado en create_gestionar_subsidios_page.
+        for idx in range(self.content_stack.count()):
+            w = self.content_stack.widget(idx)
+            # buscar por nombre de clase para mayor robustez
+            if w.__class__.__name__ in ("GestionSubsidiosContent", "SubsidiosWindow", "SubsidiosWidget"):
+                self.content_stack.setCurrentIndex(idx)
+                return
+
+        # Fallback: si no existe, intentar recargar la página (recrear) y seleccionar la última añadida
+        try:
+            self.create_gestionar_subsidios_page()
+            # seleccionar última
+            self.content_stack.setCurrentIndex(self.content_stack.count() - 1)
+        except Exception:
+            self.show_home()
+
     def show_reportes(self):
-        """Muestra la página de reportes"""
-    
+        """Muestra la página de generación de reportes - NUEVO"""
         if not self.check_connection_before_operation("Generar Reportes"):
             return
-        
-        self.content_stack.setCurrentIndex(3)  # ← Índice 3 porque es la 4ta página
+
+        self.content_stack.setCurrentIndex(4)
+
+    def show_consultar(self):
+        """Muestra la página de consulta de datos - NUEVO"""
+        if not self.check_connection_before_operation("Consultar Datos"):
+            return
+
+        self.content_stack.setCurrentIndex(5)
     
     def add_header(self, layout):
         """Agrega el header con logo y menú de usuario - SIN LÍNEAS"""
@@ -473,17 +557,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(footer)
     
     def on_module_selected(self, module_id: str):
-        """Maneja la selección de un módulo"""
+        """Maneja la selección de un módulo - CORREGIDO"""
         print(f"Módulo seleccionado: {module_id}")
         
         if module_id == "carga_masiva":
             self.show_carga_masiva()
         elif module_id == "calificaciones":
             self.show_gestionar_calificaciones()
+        elif module_id == "subsidios":
+            self.show_gestionar_subsidios()
         elif module_id == "reportes":
             self.show_reportes()
+        elif module_id == "consultar":
+            self.show_consultar()
+        elif module_id == "usuarios":
+            self.show_usuarios()
         else:
-            # TODO: Implementar otros módulos
+            # Si el módulo no está implementado, volver al home
+            print(f"Módulo '{module_id}' no implementado aún")
             self.show_home()
     
     def open_profile(self):
