@@ -130,10 +130,23 @@ class AuthService:
             try:
                 auth_user = self.auth_client.create_user_with_email_and_password(email, password)
                 uid = auth_user['localId']
+                app_logger. info(f"✅ Usuario creado en Firebase Auth.  UID: {uid}, Email: {email}")
             except Exception as e:
+                # Extraer mensaje de error específico de Pyrebase
+                error_message = str(e)
+                if hasattr(e, 'args') and len(e.args) > 1:
+                    try:
+                        import json
+                        error_data = json.loads(e.args[1])
+                        error_message = error_data.get('error', {}).get('message', str(e))
+                    except:
+                        pass
+                
+                app_logger.error(f"❌ Error creando usuario en Firebase Auth.  Email: {email}, Error: {error_message}")
+                
                 return {
-                    "success": False,
-                    "message": f"Error al crear cuenta de autenticación: {str(e)}"
+                    "success":  False,
+                    "message": f"Error al crear cuenta:  {error_message}"
                 }
 
             user_data_firestore = {
@@ -143,16 +156,24 @@ class AuthService:
                 "apellido_M": user_data.get("apellido_M"),
                 "correo": email,
                 "rol": user_data.get("rol", "cliente"),
-                "contraseña": hash_password(password),  # Por seguridad también
                 "fechaRegistro": self.get_chile_time(),
                 "ultimoAcceso": None,
                 "activo": True
             }
 
             # Guardar con UID como document ID
-            self.usuarios_ref.document(uid).set(user_data_firestore)
+            try:
+                self.usuarios_ref.document(uid).set(user_data_firestore)
+                app_logger.info(f"✅ Usuario guardado en Firestore. RUT: {rut}, UID: {uid}")
+            except Exception as firestore_error:
+                app_logger.error(f"❌ Error guardando en Firestore. RUT: {rut}, Error: {str(firestore_error)}")
+                # TODO: Considerar rollback - eliminar de Auth si falla Firestore
+                return {
+                    "success": False,
+                    "message": "Error al guardar información del usuario"
+                }
 
-            app_logger.info(f"Usuario registrado: {rut} con UID: {uid}")
+            app_logger.info(f"✅ Usuario registrado completamente:  {rut} con UID:  {uid}")
 
             return {
                 "success": True,
